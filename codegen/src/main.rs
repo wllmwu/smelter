@@ -10,16 +10,23 @@ enum NodeType {
 }
 
 #[derive(Debug, Deserialize)]
-struct CommandNode {
+struct BrigadierCommandNode {
     #[serde(rename = "type")]
     node_type: NodeType,
-    children: Option<HashMap<String, CommandNode>>,
+    children: Option<HashMap<String, BrigadierCommandNode>>,
     executable: Option<bool>,
     parser: Option<String>,
     properties: Option<HashMap<String, serde_json::Value>>,
+    redirect: Option<Vec<String>>,
 }
 
-fn visit(node: &CommandNode, name: &str, path: &Vec<&str>) {
+impl BrigadierCommandNode {
+    fn is_leaf(&self) -> bool {
+        self.children.is_none() && self.redirect.is_none()
+    }
+}
+
+fn print_tree(node: &BrigadierCommandNode, name: &str, path: &Vec<&str>) {
     let node_name = match node.node_type {
         NodeType::Argument => &format!("<{}>", name),
         NodeType::Literal => name,
@@ -39,7 +46,42 @@ fn visit(node: &CommandNode, name: &str, path: &Vec<&str>) {
             if node.node_type != NodeType::Root {
                 child_path.push(node_name);
             }
-            visit(&children[child_name], child_name, &child_path);
+            print_tree(&children[child_name], child_name, &child_path);
+        }
+    }
+}
+
+fn collapse_leaf_literals(node: &mut BrigadierCommandNode, depth: u32) {
+    if let Some(children) = &mut node.children {
+        if depth > 1 {
+            let mut literals: Vec<String> = Vec::new();
+            let names: Vec<String> = children.keys().cloned().collect();
+            for name in names {
+                let child = children.get(&name).expect("Map should have value for key");
+                if child.node_type == NodeType::Literal && child.is_leaf() {
+                    literals.push(name);
+                }
+            }
+            if literals.len() > 1 {
+                literals.sort();
+                for name in literals.iter() {
+                    children.remove(name);
+                }
+                children.insert(
+                    literals.join("|"),
+                    BrigadierCommandNode {
+                        node_type: NodeType::Argument,
+                        children: None,
+                        executable: Some(true),
+                        parser: Some(String::from("todo")),
+                        properties: None,
+                        redirect: None,
+                    },
+                );
+            }
+        }
+        for child in children.values_mut() {
+            collapse_leaf_literals(child, depth + 1);
         }
     }
 }
@@ -48,9 +90,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let res = reqwest::blocking::get(
         "https://raw.githubusercontent.com/misode/mcmeta/refs/heads/summary/commands/data.json",
     )?;
-    let json: CommandNode = res.json()?;
+    let mut json: BrigadierCommandNode = res.json()?;
 
-    visit(&json, "", &Vec::new());
+    // Algorithm:
+    // 1. Collapse sibling leaf literals: JsonCommandNode -> JsonCommandNode
+    // 2. Split tree into forest by literals: JsonCommandNode -> FunctionNode(ParameterNode)[]
+    // 3. Traverse parameter trees and generate one parameter object type for each executable node: FunctionNode[] -> FunctionSignature(NamedParameter[])[]
+    // 4. Emit TypeScript type definitions and function signatures: FunctionSignature[] -> String[]
+
+    collapse_leaf_literals(&mut json, 0);
+    print_tree(&json, "", &Vec::new());
 
     Ok(())
 }
