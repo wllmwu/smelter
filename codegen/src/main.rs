@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -13,10 +13,10 @@ enum NodeType {
 struct BrigadierCommandNode {
     #[serde(rename = "type")]
     node_type: NodeType,
-    children: Option<HashMap<String, BrigadierCommandNode>>,
+    children: Option<BTreeMap<String, BrigadierCommandNode>>,
     executable: Option<bool>,
     parser: Option<String>,
-    properties: Option<HashMap<String, serde_json::Value>>,
+    properties: Option<BTreeMap<String, serde_json::Value>>,
     redirect: Option<Vec<String>>,
 }
 
@@ -39,9 +39,7 @@ fn print_tree(node: &BrigadierCommandNode, name: &str, path: &Vec<&str>) {
         println!("{}", node_name)
     }
     if let Some(children) = &node.children {
-        let mut child_names: Vec<&String> = children.keys().collect();
-        child_names.sort();
-        for child_name in child_names {
+        for child_name in children.keys() {
             let mut child_path = path.clone();
             if node.node_type != NodeType::Root {
                 child_path.push(node_name);
@@ -63,7 +61,6 @@ fn collapse_leaf_literals(node: &mut BrigadierCommandNode, depth: u32) {
                 }
             }
             if literals.len() > 1 {
-                literals.sort();
                 for name in literals.iter() {
                     children.remove(name);
                 }
