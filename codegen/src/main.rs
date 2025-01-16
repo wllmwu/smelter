@@ -54,6 +54,22 @@ impl BrigadierTreeNode {
             BrigadierTreeNode::Literal { name, .. } => name,
         }
     }
+
+    fn is_executable(&self) -> bool {
+        match self {
+            BrigadierTreeNode::Alias { .. } => false,
+            BrigadierTreeNode::Argument { executable, .. } => *executable,
+            BrigadierTreeNode::Literal { executable, .. } => *executable,
+        }
+    }
+
+    fn get_children(&self) -> Option<&BTreeSet<BrigadierTreeNode>> {
+        match self {
+            BrigadierTreeNode::Alias { .. } => None,
+            BrigadierTreeNode::Argument { children, .. } => Some(children),
+            BrigadierTreeNode::Literal { children, .. } => Some(children),
+        }
+    }
 }
 
 impl PartialEq for BrigadierTreeNode {
@@ -79,6 +95,12 @@ impl Ord for BrigadierTreeNode {
 #[derive(Debug)]
 struct BrigadierTree {
     commands: BTreeSet<BrigadierTreeNode>,
+}
+
+#[derive(Debug)]
+enum CommandToken {
+    Argument { name: String, data_type: String },
+    Literal { value: String },
 }
 
 fn to_brigadier_tree_node(
@@ -174,6 +196,50 @@ fn to_brigadier_tree(json: &BrigadierJsonNode) -> BrigadierTree {
     }
 }
 
+fn enumerate_commands(
+    node: &BrigadierTreeNode,
+    branch: &Vec<&BrigadierTreeNode>,
+    commands: &mut Vec<Vec<CommandToken>>,
+) {
+    if let BrigadierTreeNode::Alias { .. } = node {
+        return;
+    }
+    let mut branch_copy: Vec<&BrigadierTreeNode> = branch.clone();
+    branch_copy.push(node);
+    if node.is_executable() {
+        commands.push(
+            branch_copy
+                .iter()
+                .filter_map(|n| match n {
+                    BrigadierTreeNode::Alias { .. } => None,
+                    BrigadierTreeNode::Argument { name, parser, .. } => {
+                        Some(CommandToken::Argument {
+                            name: name.clone(),
+                            data_type: parser.clone(),
+                        })
+                    }
+                    BrigadierTreeNode::Literal { name, .. } => Some(CommandToken::Literal {
+                        value: name.clone(),
+                    }),
+                })
+                .collect(),
+        );
+    }
+    if let Some(children) = node.get_children() {
+        for child in children {
+            enumerate_commands(child, &branch_copy, commands);
+        }
+    }
+}
+
+fn to_commands(tree: &BrigadierTree) -> Vec<Vec<CommandToken>> {
+    let mut commands: Vec<Vec<CommandToken>> = Vec::new();
+    for node in &tree.commands {
+        enumerate_commands(&node, &Vec::new(), &mut commands);
+    }
+    commands
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let res = reqwest::blocking::get(
         "https://raw.githubusercontent.com/misode/mcmeta/refs/heads/summary/commands/data.json",
@@ -181,7 +247,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let json: BrigadierJsonNode = res.json()?;
 
     let tree: BrigadierTree = to_brigadier_tree(&json);
-    println!("{:#?}", tree);
+
+    let commands: Vec<Vec<CommandToken>> = to_commands(&tree);
+    for command in &commands {
+        println!(
+            "{}",
+            command
+                .iter()
+                .map(|token| match token {
+                    CommandToken::Argument { name, .. } => format!("<{}>", name),
+                    CommandToken::Literal { value } => value.clone(),
+                })
+                .collect::<Vec<String>>()
+                .join(" ")
+        )
+    }
 
     Ok(())
 }
