@@ -184,7 +184,7 @@ fn to_brigadier_tree_node(
     }
 }
 
-fn to_brigadier_tree(json: &BrigadierJsonNode) -> BrigadierTree {
+fn to_brigadier_tree(json: BrigadierJsonNode) -> BrigadierTree {
     BrigadierTree {
         commands: if let Some(ch) = &json.children {
             ch.iter()
@@ -232,7 +232,7 @@ fn enumerate_commands(
     }
 }
 
-fn to_commands(tree: &BrigadierTree) -> Vec<Vec<CommandToken>> {
+fn to_commands(tree: BrigadierTree) -> Vec<Vec<CommandToken>> {
     let mut commands: Vec<Vec<CommandToken>> = Vec::new();
     for node in &tree.commands {
         enumerate_commands(&node, &Vec::new(), &mut commands);
@@ -246,9 +246,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let json: BrigadierJsonNode = res.json()?;
 
-    let tree: BrigadierTree = to_brigadier_tree(&json);
+    let tree: BrigadierTree = to_brigadier_tree(json);
 
-    let commands: Vec<Vec<CommandToken>> = to_commands(&tree);
+    let commands: Vec<Vec<CommandToken>> = to_commands(tree);
     for command in &commands {
         println!(
             "{}",
