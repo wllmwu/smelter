@@ -103,6 +103,12 @@ enum CommandToken {
     Literal { value: String },
 }
 
+#[derive(Debug)]
+struct NamedParameter {
+    name: String,
+    data_type: String,
+}
+
 fn to_brigadier_tree_node(
     name: &String,
     json_node: &BrigadierJsonNode,
@@ -240,6 +246,64 @@ fn to_commands(tree: BrigadierTree) -> Vec<Vec<CommandToken>> {
     commands
 }
 
+fn get_name_and_parameters(command: &Vec<CommandToken>) -> (Vec<String>, Vec<NamedParameter>) {
+    let mut name: Vec<String> = Vec::new();
+    let mut parameters: Vec<NamedParameter> = Vec::new();
+    for token in command {
+        match token {
+            CommandToken::Argument { name, data_type } => parameters.push(NamedParameter {
+                name: name.clone(),
+                data_type: data_type.clone(),
+            }),
+            CommandToken::Literal { value } => name.push(value.clone()),
+        }
+    }
+    (name, parameters)
+}
+
+fn to_function_signatures(
+    commands: Vec<Vec<CommandToken>>,
+) -> BTreeMap<Vec<String>, Vec<Vec<NamedParameter>>> {
+    let mut signatures: BTreeMap<Vec<String>, Vec<Vec<NamedParameter>>> = BTreeMap::new();
+    for command in &commands {
+        let (name, parameters) = get_name_and_parameters(command);
+        if let Some(signature) = signatures.get_mut(&name) {
+            signature.push(parameters);
+        } else {
+            signatures.insert(name, vec![parameters]);
+        }
+    }
+    signatures
+}
+
+fn emit_function_signatures_typescript(
+    signatures: &BTreeMap<Vec<String>, Vec<Vec<NamedParameter>>>,
+) {
+    for (name, parameters) in signatures {
+        let upper_snake_case_name: Vec<String> = name
+            .iter()
+            .map(|s| s[0..1].to_ascii_uppercase() + &s[1..])
+            .collect();
+        let args_type_name: String = format!("{}Args", upper_snake_case_name.join(""));
+        let function_name: String = format!("{}{}", name[0], upper_snake_case_name[1..].join(""));
+        println!("type {} =", args_type_name);
+        for (i, parameter_combination) in parameters.iter().enumerate() {
+            let object_type_properties: Vec<String> = parameter_combination
+                .iter()
+                .map(|NamedParameter { name, data_type }| format!("{}: \"{}\"", name, data_type))
+                .collect();
+            print!("  | {{ {} }}", object_type_properties.join(", "));
+            if i < parameters.len() {
+                println!();
+            } else {
+                println!(";");
+            }
+        }
+        println!("function {}(args: {}) {{}}", function_name, args_type_name);
+        println!();
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let res = reqwest::blocking::get(
         "https://raw.githubusercontent.com/misode/mcmeta/refs/heads/summary/commands/data.json",
@@ -249,19 +313,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tree: BrigadierTree = to_brigadier_tree(json);
 
     let commands: Vec<Vec<CommandToken>> = to_commands(tree);
-    for command in &commands {
-        println!(
-            "{}",
-            command
-                .iter()
-                .map(|token| match token {
-                    CommandToken::Argument { name, .. } => format!("<{}>", name),
-                    CommandToken::Literal { value } => value.clone(),
-                })
-                .collect::<Vec<String>>()
-                .join(" ")
-        )
-    }
+    // for command in &commands {
+    //     println!(
+    //         "{}",
+    //         command
+    //             .iter()
+    //             .map(|token| match token {
+    //                 CommandToken::Argument { name, .. } => format!("<{}>", name),
+    //                 CommandToken::Literal { value } => value.clone(),
+    //             })
+    //             .collect::<Vec<String>>()
+    //             .join(" ")
+    //     )
+    // }
+
+    let generated_signatures = to_function_signatures(commands);
+    emit_function_signatures_typescript(&generated_signatures);
 
     Ok(())
 }
