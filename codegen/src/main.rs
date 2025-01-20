@@ -1,5 +1,8 @@
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    ops::RangeFrom,
+};
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -20,12 +23,6 @@ struct BrigadierJsonNode {
     redirect: Option<Vec<String>>,
 }
 
-impl BrigadierJsonNode {
-    fn is_leaf(&self) -> bool {
-        self.children.is_none() && self.redirect.is_none()
-    }
-}
-
 #[derive(Debug)]
 enum BrigadierTreeNode {
     Alias {
@@ -37,6 +34,13 @@ enum BrigadierTreeNode {
         executable: bool,
         parser: String,
         properties: Option<BTreeMap<String, serde_json::Value>>,
+        children: BTreeSet<BrigadierTreeNode>,
+    },
+    Enum {
+        /** Only used for sorting nodes alphabetically. */
+        name: String,
+        values: Vec<String>,
+        executable: bool,
         children: BTreeSet<BrigadierTreeNode>,
     },
     Literal {
@@ -51,6 +55,7 @@ impl BrigadierTreeNode {
         match self {
             BrigadierTreeNode::Alias { name, .. } => name,
             BrigadierTreeNode::Argument { name, .. } => name,
+            BrigadierTreeNode::Enum { name, .. } => name,
             BrigadierTreeNode::Literal { name, .. } => name,
         }
     }
@@ -59,7 +64,26 @@ impl BrigadierTreeNode {
         match self {
             BrigadierTreeNode::Alias { .. } => false,
             BrigadierTreeNode::Argument { executable, .. } => *executable,
+            BrigadierTreeNode::Enum { executable, .. } => *executable,
             BrigadierTreeNode::Literal { executable, .. } => *executable,
+        }
+    }
+
+    fn get_canonical_string(&self) -> String {
+        match self {
+            BrigadierTreeNode::Alias { name, .. } => format!("Al({})", name),
+            BrigadierTreeNode::Argument {
+                name,
+                executable,
+                parser,
+                ..
+            } => format!("Arg({},{},{})", name, parser, executable),
+            BrigadierTreeNode::Enum {
+                values, executable, ..
+            } => format!("En({},{})", values.join("|"), executable),
+            BrigadierTreeNode::Literal {
+                name, executable, ..
+            } => format!("Lit({},{})", name, executable),
         }
     }
 
@@ -67,6 +91,7 @@ impl BrigadierTreeNode {
         match self {
             BrigadierTreeNode::Alias { .. } => None,
             BrigadierTreeNode::Argument { children, .. } => Some(children),
+            BrigadierTreeNode::Enum { children, .. } => Some(children),
             BrigadierTreeNode::Literal { children, .. } => Some(children),
         }
     }
@@ -100,6 +125,7 @@ struct BrigadierTree {
 #[derive(Debug)]
 enum CommandToken {
     Argument { name: String, data_type: String },
+    Enum { values: Vec<String> },
     Literal { value: String },
 }
 
@@ -116,48 +142,10 @@ fn to_brigadier_tree_node(
     }
 
     let children: BTreeSet<BrigadierTreeNode> = if let Some(json_children) = &json_node.children {
-        let mut leaf_literals: BTreeSet<&String> = json_children
+        json_children
             .iter()
-            .filter_map(|(name, child)| {
-                if child.node_type == BrigadierJsonNodeType::Literal && child.is_leaf() {
-                    Some(name)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        if depth <= 1 || leaf_literals.len() <= 1 {
-            leaf_literals.clear();
-        }
-
-        let mut mapped_children: BTreeSet<BrigadierTreeNode> = json_children
-            .iter()
-            .filter_map(|(name, child)| {
-                if !leaf_literals.contains(name) {
-                    Some(to_brigadier_tree_node(name, child, depth + 1))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Collapse sibling leaf literals
-        if !leaf_literals.is_empty() {
-            mapped_children.insert(BrigadierTreeNode::Argument {
-                name: String::from("option"),
-                executable: true,
-                parser: leaf_literals
-                    .iter()
-                    .cloned()
-                    .cloned()
-                    .collect::<Vec<String>>()
-                    .join("|"),
-                properties: None,
-                children: BTreeSet::new(),
-            });
-        }
-
-        mapped_children
+            .map(|(name, child)| to_brigadier_tree_node(name, child, depth + 1))
+            .collect()
     } else {
         BTreeSet::new()
     };
@@ -196,6 +184,110 @@ fn to_brigadier_tree(json: BrigadierJsonNode) -> BrigadierTree {
     }
 }
 
+fn consolidate_literals_into_enums_inner(node: &BrigadierTreeNode) -> (BrigadierTreeNode, String) {
+    let mut new_children: BTreeSet<BrigadierTreeNode> = BTreeSet::new();
+    let mut subtrees: Vec<String> = Vec::new();
+    if let Some(children) = node.get_children() {
+        let mut new_children_and_subtrees: BTreeSet<(BrigadierTreeNode, String)> = BTreeSet::new();
+        let mut merge_candidates: HashMap<(String, bool), Vec<BrigadierTreeNode>> = HashMap::new();
+        for child in children {
+            let (new_child, new_child_subtrees_canon) =
+                consolidate_literals_into_enums_inner(child);
+            match new_child {
+                BrigadierTreeNode::Literal { .. } => {
+                    let key = (new_child_subtrees_canon, new_child.is_executable());
+                    if !merge_candidates.contains_key(&key) {
+                        merge_candidates.insert(key.clone(), Vec::new());
+                    }
+                    merge_candidates.get_mut(&key).unwrap().push(new_child);
+                }
+                _ => {
+                    new_children_and_subtrees.insert((new_child, new_child_subtrees_canon));
+                }
+            }
+        }
+        for ((subtree_canon, is_executable), candidates) in merge_candidates.iter_mut() {
+            let subtree_canon: String = subtree_canon.clone();
+            if candidates.is_empty() {
+                continue;
+            } else if candidates.len() == 1 {
+                new_children_and_subtrees.insert((candidates.pop().unwrap(), subtree_canon));
+            } else {
+                let enum_values: Vec<String> =
+                    candidates.iter().map(|n| n.get_name().clone()).collect();
+                let enum_children: BTreeSet<BrigadierTreeNode> = match candidates.pop().unwrap() {
+                    BrigadierTreeNode::Literal { children, .. } => children,
+                    _ => panic!("Expected merge candidates to all be literals"),
+                };
+                new_children_and_subtrees.insert((
+                    BrigadierTreeNode::Enum {
+                        name: enum_values.join("|"),
+                        values: enum_values,
+                        executable: is_executable.clone(),
+                        children: enum_children,
+                    },
+                    subtree_canon,
+                ));
+            }
+        }
+        for (new_child, new_child_subtrees) in new_children_and_subtrees.into_iter() {
+            let new_child_canon = new_child.get_canonical_string();
+            new_children.insert(new_child);
+            subtrees.push(format!("{}[{}]", new_child_canon, new_child_subtrees));
+        }
+    }
+    (
+        match node {
+            BrigadierTreeNode::Alias { name, redirect } => BrigadierTreeNode::Alias {
+                name: name.clone(),
+                redirect: redirect.clone(),
+            },
+            BrigadierTreeNode::Argument {
+                name,
+                executable,
+                parser,
+                properties,
+                ..
+            } => BrigadierTreeNode::Argument {
+                name: name.clone(),
+                executable: executable.clone(),
+                parser: parser.clone(),
+                properties: properties.clone(),
+                children: new_children,
+            },
+            BrigadierTreeNode::Enum {
+                name,
+                values,
+                executable,
+                ..
+            } => BrigadierTreeNode::Enum {
+                name: name.clone(),
+                values: values.clone(),
+                executable: executable.clone(),
+                children: new_children,
+            },
+            BrigadierTreeNode::Literal {
+                name, executable, ..
+            } => BrigadierTreeNode::Literal {
+                name: name.clone(),
+                executable: executable.clone(),
+                children: new_children,
+            },
+        },
+        subtrees.join(";"),
+    )
+}
+
+fn consolidate_literals_into_enums(tree: BrigadierTree) -> BrigadierTree {
+    BrigadierTree {
+        commands: tree
+            .commands
+            .iter()
+            .map(|node| consolidate_literals_into_enums_inner(node).0)
+            .collect(),
+    }
+}
+
 fn list_command_variants(
     node: &BrigadierTreeNode,
     branch: &Vec<&BrigadierTreeNode>,
@@ -221,6 +313,9 @@ fn list_command_variants(
                             data_type: parser.clone(),
                         })
                     }
+                    BrigadierTreeNode::Enum { values, .. } => Some(CommandToken::Enum {
+                        values: values.clone(),
+                    }),
                     BrigadierTreeNode::Literal { name, .. } => Some(CommandToken::Literal {
                         value: name.clone(),
                     }),
@@ -334,15 +429,30 @@ fn emit_generated_typescript(commands: &BTreeMap<String, Vec<Vec<CommandToken>>>
     for (command_name, variants) in commands {
         println!("  {}: {{", fix_object_type_key(command_name));
         for tokens in variants {
+            let mut literal_index: RangeFrom<i32> = 0..;
             let parameters: Vec<String> = tokens
                 .iter()
-                .enumerate()
-                .map(|(i, token)| match token {
+                .map(|token| match token {
                     CommandToken::Argument { name, data_type } => {
                         format!("{}: \"{}\"", fix_identifier(name), data_type)
                     }
+                    CommandToken::Enum { values } => {
+                        format!(
+                            "{}: {}",
+                            String::from("opt") + &literal_index.next().unwrap().to_string(),
+                            values
+                                .iter()
+                                .map(|v| format!("\"{}\"", v))
+                                .collect::<Vec<String>>()
+                                .join(" | ")
+                        )
+                    }
                     CommandToken::Literal { value } => {
-                        format!("{}: \"{}\"", String::from("lit") + &i.to_string(), value)
+                        format!(
+                            "{}: \"{}\"",
+                            String::from("opt") + &literal_index.next().unwrap().to_string(),
+                            value
+                        )
                     }
                 })
                 .collect();
@@ -373,7 +483,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let json: BrigadierJsonNode = res.json()?;
 
-    let tree: BrigadierTree = to_brigadier_tree(json);
+    let tree: BrigadierTree = consolidate_literals_into_enums(to_brigadier_tree(json));
+
+    // Optimizations:
+    // 1. Merge sibling literals that have same subtrees
+    // 2. Use optional parameters for consecutive executable nodes
 
     let commands: BTreeMap<String, Vec<Vec<CommandToken>>> = to_commands(tree);
 
