@@ -103,12 +103,6 @@ enum CommandToken {
     Literal { value: String },
 }
 
-#[derive(Debug)]
-struct NamedParameter {
-    name: String,
-    data_type: String,
-}
-
 fn to_brigadier_tree_node(
     name: &String,
     json_node: &BrigadierJsonNode,
@@ -150,14 +144,14 @@ fn to_brigadier_tree_node(
         // Collapse sibling leaf literals
         if !leaf_literals.is_empty() {
             mapped_children.insert(BrigadierTreeNode::Argument {
-                name: leaf_literals
+                name: String::from("option"),
+                executable: true,
+                parser: leaf_literals
                     .iter()
                     .cloned()
                     .cloned()
                     .collect::<Vec<String>>()
                     .join("|"),
-                executable: true,
-                parser: String::from("TODO"),
                 properties: None,
                 children: BTreeSet::new(),
             });
@@ -202,10 +196,10 @@ fn to_brigadier_tree(json: BrigadierJsonNode) -> BrigadierTree {
     }
 }
 
-fn enumerate_commands(
+fn list_command_variants(
     node: &BrigadierTreeNode,
     branch: &Vec<&BrigadierTreeNode>,
-    commands: &mut Vec<Vec<CommandToken>>,
+    commands: &mut BTreeMap<String, Vec<Vec<CommandToken>>>,
 ) {
     if let BrigadierTreeNode::Alias { .. } = node {
         return;
@@ -213,8 +207,11 @@ fn enumerate_commands(
     let mut branch_copy: Vec<&BrigadierTreeNode> = branch.clone();
     branch_copy.push(node);
     if node.is_executable() {
-        commands.push(
-            branch_copy
+        let command_variants = commands
+            .get_mut(branch_copy.first().unwrap().get_name())
+            .unwrap();
+        command_variants.push(
+            branch_copy[1..]
                 .iter()
                 .filter_map(|n| match n {
                     BrigadierTreeNode::Alias { .. } => None,
@@ -233,74 +230,133 @@ fn enumerate_commands(
     }
     if let Some(children) = node.get_children() {
         for child in children {
-            enumerate_commands(child, &branch_copy, commands);
+            list_command_variants(child, &branch_copy, commands);
         }
     }
 }
 
-fn to_commands(tree: BrigadierTree) -> Vec<Vec<CommandToken>> {
-    let mut commands: Vec<Vec<CommandToken>> = Vec::new();
+fn to_commands(tree: BrigadierTree) -> BTreeMap<String, Vec<Vec<CommandToken>>> {
+    let mut commands: BTreeMap<String, Vec<Vec<CommandToken>>> = BTreeMap::new();
     for node in &tree.commands {
-        enumerate_commands(&node, &Vec::new(), &mut commands);
+        commands.insert(node.get_name().clone(), Vec::new());
+        list_command_variants(&node, &Vec::new(), &mut commands);
+        if commands.get(node.get_name()).unwrap().is_empty() {
+            commands.remove(node.get_name());
+        }
     }
     commands
 }
 
-fn get_name_and_parameters(command: &Vec<CommandToken>) -> (Vec<String>, Vec<NamedParameter>) {
-    let mut name: Vec<String> = Vec::new();
-    let mut parameters: Vec<NamedParameter> = Vec::new();
-    for token in command {
-        match token {
-            CommandToken::Argument { name, data_type } => parameters.push(NamedParameter {
-                name: name.clone(),
-                data_type: data_type.clone(),
-            }),
-            CommandToken::Literal { value } => name.push(value.clone()),
+// Static string array: https://stackoverflow.com/a/32383866
+static RESERVED_KEYWORDS_JAVASCRIPT: &[&str] = &[
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "new",
+    "null",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "let",
+    "static",
+    "yield",
+    "await",
+    "enum",
+    "implements",
+    "interface",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "arguments",
+    "eval",
+];
+
+fn fix_identifier(identifier: &String) -> String {
+    for keyword in RESERVED_KEYWORDS_JAVASCRIPT {
+        if identifier.eq(keyword) {
+            return identifier.clone() + "_";
         }
     }
-    (name, parameters)
+    identifier.clone()
 }
 
-fn to_function_signatures(
-    commands: Vec<Vec<CommandToken>>,
-) -> BTreeMap<Vec<String>, Vec<Vec<NamedParameter>>> {
-    let mut signatures: BTreeMap<Vec<String>, Vec<Vec<NamedParameter>>> = BTreeMap::new();
-    for command in &commands {
-        let (name, parameters) = get_name_and_parameters(command);
-        if let Some(signature) = signatures.get_mut(&name) {
-            signature.push(parameters);
-        } else {
-            signatures.insert(name, vec![parameters]);
-        }
-    }
-    signatures
-}
-
-fn emit_function_signatures_typescript(
-    signatures: &BTreeMap<Vec<String>, Vec<Vec<NamedParameter>>>,
-) {
-    for (name, parameters) in signatures {
-        let upper_snake_case_name: Vec<String> = name
-            .iter()
-            .map(|s| s[0..1].to_ascii_uppercase() + &s[1..])
-            .collect();
-        let args_type_name: String = format!("{}Args", upper_snake_case_name.join(""));
-        let function_name: String = format!("{}{}", name[0], upper_snake_case_name[1..].join(""));
-        println!("type {} =", args_type_name);
-        for (i, parameter_combination) in parameters.iter().enumerate() {
-            let object_type_properties: Vec<String> = parameter_combination
-                .iter()
-                .map(|NamedParameter { name, data_type }| format!("{}: \"{}\"", name, data_type))
-                .collect();
-            print!("  | {{ {} }}", object_type_properties.join(", "));
-            if i < parameters.len() {
-                println!();
+fn fix_command_name(name: &String) -> String {
+    let split: Vec<String> = name
+        .clone()
+        .split("-")
+        .enumerate()
+        .map(|(i, s)| {
+            if i == 0 {
+                s.to_string()
             } else {
-                println!(";");
+                s[0..1].to_ascii_uppercase() + &s[1..]
             }
+        })
+        .collect();
+    fix_identifier(&split.join(""))
+}
+
+fn emit_generated_typescript(commands: &BTreeMap<String, Vec<Vec<CommandToken>>>) {
+    println!("type MinecraftCommands = {{");
+    for (command_name, variants) in commands {
+        println!("  {}: {{", fix_command_name(command_name));
+        for tokens in variants {
+            let parameters: Vec<String> = tokens
+                .iter()
+                .enumerate()
+                .map(|(i, token)| match token {
+                    CommandToken::Argument { name, data_type } => {
+                        format!("{}: \"{}\"", fix_identifier(name), data_type)
+                    }
+                    CommandToken::Literal { value } => {
+                        format!("{}: \"{}\"", String::from("lit") + &i.to_string(), value)
+                    }
+                })
+                .collect();
+            println!("    ({}): void;", parameters.join(", "));
         }
-        println!("function {}(args: {}) {{}}", function_name, args_type_name);
-        println!();
+        println!("  }};");
+    }
+    println!("}};");
+    println!();
+
+    println!("function __emitMacro<Command extends keyof MinecraftCommands>(command: Command): MinecraftCommands[typeof command] {{");
+    println!("  return (...tokens: any[]) => console.log(\"$\", ...tokens);");
+    println!("}}");
+
+    for command_name in commands.keys() {
+        println!(
+            "export const {0} = __emitMacro(\"{0}\");",
+            fix_command_name(command_name)
+        );
     }
 }
 
@@ -312,23 +368,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let tree: BrigadierTree = to_brigadier_tree(json);
 
-    let commands: Vec<Vec<CommandToken>> = to_commands(tree);
-    // for command in &commands {
-    //     println!(
-    //         "{}",
-    //         command
-    //             .iter()
-    //             .map(|token| match token {
-    //                 CommandToken::Argument { name, .. } => format!("<{}>", name),
-    //                 CommandToken::Literal { value } => value.clone(),
-    //             })
-    //             .collect::<Vec<String>>()
-    //             .join(" ")
-    //     )
-    // }
+    let commands: BTreeMap<String, Vec<Vec<CommandToken>>> = to_commands(tree);
 
-    let generated_signatures = to_function_signatures(commands);
-    emit_function_signatures_typescript(&generated_signatures);
+    emit_generated_typescript(&commands);
 
     Ok(())
 }
