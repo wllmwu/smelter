@@ -124,9 +124,19 @@ struct BrigadierTree {
 
 #[derive(Debug)]
 enum CommandToken {
-    Argument { name: String, data_type: String },
-    Enum { values: Vec<String> },
-    Literal { value: String },
+    Argument {
+        name: String,
+        data_type: String,
+        is_optional: bool,
+    },
+    Enum {
+        values: Vec<String>,
+        is_optional: bool,
+    },
+    Literal {
+        value: String,
+        is_optional: bool,
+    },
 }
 
 fn to_brigadier_tree_node(
@@ -298,32 +308,55 @@ fn list_command_variants(
     }
     let mut branch_copy: Vec<&BrigadierTreeNode> = branch.clone();
     branch_copy.push(node);
+    let mut children_to_iterate: Option<&BTreeSet<BrigadierTreeNode>> = node.get_children();
     if node.is_executable() {
+        // Include consecutive descendants which are executable and single children as optional parameters
+        let node_index: usize = branch_copy.len() - 1;
+        let mut optional_candidate: &BrigadierTreeNode = node;
+        while let Some(children) = optional_candidate.get_children() {
+            if children.len() != 1 {
+                break;
+            }
+            optional_candidate = children.first().unwrap();
+            if !optional_candidate.is_executable() {
+                break;
+            }
+            branch_copy.push(optional_candidate);
+            children_to_iterate = optional_candidate.get_children();
+        }
+
         let command_variants = commands
             .get_mut(branch_copy.first().unwrap().get_name())
             .unwrap();
         command_variants.push(
             branch_copy[1..]
                 .iter()
-                .filter_map(|n| match n {
-                    BrigadierTreeNode::Alias { .. } => None,
-                    BrigadierTreeNode::Argument { name, parser, .. } => {
-                        Some(CommandToken::Argument {
-                            name: name.clone(),
-                            data_type: parser.clone(),
-                        })
+                .enumerate()
+                .filter_map(|(i, n)| {
+                    let is_optional: bool = i + 1 > node_index;
+                    match n {
+                        BrigadierTreeNode::Alias { .. } => None,
+                        BrigadierTreeNode::Argument { name, parser, .. } => {
+                            Some(CommandToken::Argument {
+                                name: name.clone(),
+                                data_type: parser.clone(),
+                                is_optional,
+                            })
+                        }
+                        BrigadierTreeNode::Enum { values, .. } => Some(CommandToken::Enum {
+                            values: values.clone(),
+                            is_optional,
+                        }),
+                        BrigadierTreeNode::Literal { name, .. } => Some(CommandToken::Literal {
+                            value: name.clone(),
+                            is_optional,
+                        }),
                     }
-                    BrigadierTreeNode::Enum { values, .. } => Some(CommandToken::Enum {
-                        values: values.clone(),
-                    }),
-                    BrigadierTreeNode::Literal { name, .. } => Some(CommandToken::Literal {
-                        value: name.clone(),
-                    }),
                 })
                 .collect(),
         );
     }
-    if let Some(children) = node.get_children() {
+    if let Some(children) = children_to_iterate {
         for child in children {
             list_command_variants(child, &branch_copy, commands);
         }
@@ -433,13 +466,26 @@ fn emit_generated_typescript(commands: &BTreeMap<String, Vec<Vec<CommandToken>>>
             let parameters: Vec<String> = tokens
                 .iter()
                 .map(|token| match token {
-                    CommandToken::Argument { name, data_type } => {
-                        format!("{}: \"{}\"", fix_identifier(name), data_type)
-                    }
-                    CommandToken::Enum { values } => {
+                    CommandToken::Argument {
+                        name,
+                        data_type,
+                        is_optional,
+                    } => {
                         format!(
-                            "{}: {}",
+                            "{}{}: \"{}\"",
+                            fix_identifier(name),
+                            if *is_optional { "?" } else { "" },
+                            data_type
+                        )
+                    }
+                    CommandToken::Enum {
+                        values,
+                        is_optional,
+                    } => {
+                        format!(
+                            "{}{}: {}",
                             String::from("opt") + &literal_index.next().unwrap().to_string(),
+                            if *is_optional { "?" } else { "" },
                             values
                                 .iter()
                                 .map(|v| format!("\"{}\"", v))
@@ -447,10 +493,11 @@ fn emit_generated_typescript(commands: &BTreeMap<String, Vec<Vec<CommandToken>>>
                                 .join(" | ")
                         )
                     }
-                    CommandToken::Literal { value } => {
+                    CommandToken::Literal { value, is_optional } => {
                         format!(
-                            "{}: \"{}\"",
+                            "{}{}: \"{}\"",
                             String::from("opt") + &literal_index.next().unwrap().to_string(),
+                            if *is_optional { "?" } else { "" },
                             value
                         )
                     }
