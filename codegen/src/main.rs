@@ -300,16 +300,7 @@ static RESERVED_KEYWORDS_JAVASCRIPT: &[&str] = &[
 ];
 
 fn fix_identifier(identifier: &String) -> String {
-    for keyword in RESERVED_KEYWORDS_JAVASCRIPT {
-        if identifier.eq(keyword) {
-            return identifier.clone() + "_";
-        }
-    }
-    identifier.clone()
-}
-
-fn fix_command_name(name: &String) -> String {
-    let split: Vec<String> = name
+    let without_dashes: String = identifier
         .clone()
         .split("-")
         .enumerate()
@@ -320,14 +311,28 @@ fn fix_command_name(name: &String) -> String {
                 s[0..1].to_ascii_uppercase() + &s[1..]
             }
         })
-        .collect();
-    fix_identifier(&split.join(""))
+        .collect::<Vec<String>>()
+        .join("");
+    for keyword in RESERVED_KEYWORDS_JAVASCRIPT {
+        if without_dashes.eq(keyword) {
+            return without_dashes + "_";
+        }
+    }
+    without_dashes
+}
+
+fn fix_object_type_key(key: &String) -> String {
+    if key.contains("-") {
+        format!("\"{}\"", key)
+    } else {
+        key.clone()
+    }
 }
 
 fn emit_generated_typescript(commands: &BTreeMap<String, Vec<Vec<CommandToken>>>) {
     println!("type MinecraftCommands = {{");
     for (command_name, variants) in commands {
-        println!("  {}: {{", fix_command_name(command_name));
+        println!("  {}: {{", fix_object_type_key(command_name));
         for tokens in variants {
             let parameters: Vec<String> = tokens
                 .iter()
@@ -351,11 +356,13 @@ fn emit_generated_typescript(commands: &BTreeMap<String, Vec<Vec<CommandToken>>>
     println!("function __emitMacro<Command extends keyof MinecraftCommands>(command: Command): MinecraftCommands[typeof command] {{");
     println!("  return (...tokens: any[]) => console.log(\"$\", ...tokens);");
     println!("}}");
+    println!();
 
     for command_name in commands.keys() {
         println!(
-            "export const {0} = __emitMacro(\"{0}\");",
-            fix_command_name(command_name)
+            "export const {} = __emitMacro(\"{}\");",
+            fix_identifier(command_name),
+            command_name
         );
     }
 }
