@@ -25,10 +25,6 @@ struct BrigadierJsonNode {
 
 #[derive(Debug)]
 enum BrigadierTreeNode {
-    Alias {
-        name: String,
-        redirect: Vec<String>,
-    },
     Argument {
         name: String,
         executable: bool,
@@ -53,7 +49,6 @@ enum BrigadierTreeNode {
 impl BrigadierTreeNode {
     fn get_name(&self) -> &String {
         match self {
-            BrigadierTreeNode::Alias { name, .. } => name,
             BrigadierTreeNode::Argument { name, .. } => name,
             BrigadierTreeNode::Enum { name, .. } => name,
             BrigadierTreeNode::Literal { name, .. } => name,
@@ -62,7 +57,6 @@ impl BrigadierTreeNode {
 
     fn is_executable(&self) -> bool {
         match self {
-            BrigadierTreeNode::Alias { .. } => false,
             BrigadierTreeNode::Argument { executable, .. } => *executable,
             BrigadierTreeNode::Enum { executable, .. } => *executable,
             BrigadierTreeNode::Literal { executable, .. } => *executable,
@@ -71,7 +65,6 @@ impl BrigadierTreeNode {
 
     fn get_canonical_string(&self) -> String {
         match self {
-            BrigadierTreeNode::Alias { name, .. } => format!("Al({})", name),
             BrigadierTreeNode::Argument {
                 name,
                 executable,
@@ -87,12 +80,11 @@ impl BrigadierTreeNode {
         }
     }
 
-    fn get_children(&self) -> Option<&BTreeSet<BrigadierTreeNode>> {
+    fn get_children(&self) -> &BTreeSet<BrigadierTreeNode> {
         match self {
-            BrigadierTreeNode::Alias { .. } => None,
-            BrigadierTreeNode::Argument { children, .. } => Some(children),
-            BrigadierTreeNode::Enum { children, .. } => Some(children),
-            BrigadierTreeNode::Literal { children, .. } => Some(children),
+            BrigadierTreeNode::Argument { children, .. } => children,
+            BrigadierTreeNode::Enum { children, .. } => children,
+            BrigadierTreeNode::Literal { children, .. } => children,
         }
     }
 }
@@ -144,13 +136,6 @@ fn to_brigadier_tree_node(
     json_node: &BrigadierJsonNode,
     depth: u32,
 ) -> BrigadierTreeNode {
-    if let Some(redirect) = &json_node.redirect {
-        return BrigadierTreeNode::Alias {
-            name: name.clone(),
-            redirect: redirect.clone(),
-        };
-    }
-
     let children: BTreeSet<BrigadierTreeNode> = if let Some(json_children) = &json_node.children {
         json_children
             .iter()
@@ -195,63 +180,57 @@ fn to_brigadier_tree(json: BrigadierJsonNode) -> BrigadierTree {
 }
 
 fn consolidate_literals_into_enums_inner(node: &BrigadierTreeNode) -> (BrigadierTreeNode, String) {
+    let children: &BTreeSet<BrigadierTreeNode> = node.get_children();
+    let mut new_children_and_subtrees: BTreeSet<(BrigadierTreeNode, String)> = BTreeSet::new();
+    let mut merge_candidates: HashMap<(String, bool), Vec<BrigadierTreeNode>> = HashMap::new();
+    for child in children {
+        let (new_child, new_child_subtrees_canon) = consolidate_literals_into_enums_inner(child);
+        match new_child {
+            BrigadierTreeNode::Literal { .. } => {
+                let key = (new_child_subtrees_canon, new_child.is_executable());
+                if !merge_candidates.contains_key(&key) {
+                    merge_candidates.insert(key.clone(), Vec::new());
+                }
+                merge_candidates.get_mut(&key).unwrap().push(new_child);
+            }
+            _ => {
+                new_children_and_subtrees.insert((new_child, new_child_subtrees_canon));
+            }
+        }
+    }
+    for ((subtree_canon, is_executable), candidates) in merge_candidates.iter_mut() {
+        let subtree_canon: String = subtree_canon.clone();
+        if candidates.is_empty() {
+            continue;
+        } else if candidates.len() == 1 {
+            new_children_and_subtrees.insert((candidates.pop().unwrap(), subtree_canon));
+        } else {
+            let enum_values: Vec<String> =
+                candidates.iter().map(|n| n.get_name().clone()).collect();
+            let enum_children: BTreeSet<BrigadierTreeNode> = match candidates.pop().unwrap() {
+                BrigadierTreeNode::Literal { children, .. } => children,
+                _ => panic!("Expected merge candidates to all be literals"),
+            };
+            new_children_and_subtrees.insert((
+                BrigadierTreeNode::Enum {
+                    name: enum_values.join("|"),
+                    values: enum_values,
+                    executable: is_executable.clone(),
+                    children: enum_children,
+                },
+                subtree_canon,
+            ));
+        }
+    }
     let mut new_children: BTreeSet<BrigadierTreeNode> = BTreeSet::new();
     let mut subtrees: Vec<String> = Vec::new();
-    if let Some(children) = node.get_children() {
-        let mut new_children_and_subtrees: BTreeSet<(BrigadierTreeNode, String)> = BTreeSet::new();
-        let mut merge_candidates: HashMap<(String, bool), Vec<BrigadierTreeNode>> = HashMap::new();
-        for child in children {
-            let (new_child, new_child_subtrees_canon) =
-                consolidate_literals_into_enums_inner(child);
-            match new_child {
-                BrigadierTreeNode::Literal { .. } => {
-                    let key = (new_child_subtrees_canon, new_child.is_executable());
-                    if !merge_candidates.contains_key(&key) {
-                        merge_candidates.insert(key.clone(), Vec::new());
-                    }
-                    merge_candidates.get_mut(&key).unwrap().push(new_child);
-                }
-                _ => {
-                    new_children_and_subtrees.insert((new_child, new_child_subtrees_canon));
-                }
-            }
-        }
-        for ((subtree_canon, is_executable), candidates) in merge_candidates.iter_mut() {
-            let subtree_canon: String = subtree_canon.clone();
-            if candidates.is_empty() {
-                continue;
-            } else if candidates.len() == 1 {
-                new_children_and_subtrees.insert((candidates.pop().unwrap(), subtree_canon));
-            } else {
-                let enum_values: Vec<String> =
-                    candidates.iter().map(|n| n.get_name().clone()).collect();
-                let enum_children: BTreeSet<BrigadierTreeNode> = match candidates.pop().unwrap() {
-                    BrigadierTreeNode::Literal { children, .. } => children,
-                    _ => panic!("Expected merge candidates to all be literals"),
-                };
-                new_children_and_subtrees.insert((
-                    BrigadierTreeNode::Enum {
-                        name: enum_values.join("|"),
-                        values: enum_values,
-                        executable: is_executable.clone(),
-                        children: enum_children,
-                    },
-                    subtree_canon,
-                ));
-            }
-        }
-        for (new_child, new_child_subtrees) in new_children_and_subtrees.into_iter() {
-            let new_child_canon = new_child.get_canonical_string();
-            new_children.insert(new_child);
-            subtrees.push(format!("{}[{}]", new_child_canon, new_child_subtrees));
-        }
+    for (new_child, new_child_subtrees) in new_children_and_subtrees.into_iter() {
+        let new_child_canon = new_child.get_canonical_string();
+        new_children.insert(new_child);
+        subtrees.push(format!("{}[{}]", new_child_canon, new_child_subtrees));
     }
     (
         match node {
-            BrigadierTreeNode::Alias { name, redirect } => BrigadierTreeNode::Alias {
-                name: name.clone(),
-                redirect: redirect.clone(),
-            },
             BrigadierTreeNode::Argument {
                 name,
                 executable,
@@ -303,17 +282,15 @@ fn list_command_variants(
     branch: &Vec<&BrigadierTreeNode>,
     commands: &mut BTreeMap<String, Vec<Vec<CommandToken>>>,
 ) {
-    if let BrigadierTreeNode::Alias { .. } = node {
-        return;
-    }
     let mut branch_copy: Vec<&BrigadierTreeNode> = branch.clone();
     branch_copy.push(node);
-    let mut children_to_iterate: Option<&BTreeSet<BrigadierTreeNode>> = node.get_children();
+    let mut children_to_iterate: &BTreeSet<BrigadierTreeNode> = node.get_children();
     if node.is_executable() {
         // Include consecutive descendants which are executable and single children as optional parameters
         let node_index: usize = branch_copy.len() - 1;
         let mut optional_candidate: &BrigadierTreeNode = node;
-        while let Some(children) = optional_candidate.get_children() {
+        loop {
+            let children = optional_candidate.get_children();
             if children.len() != 1 {
                 break;
             }
@@ -332,34 +309,31 @@ fn list_command_variants(
             branch_copy[1..]
                 .iter()
                 .enumerate()
-                .filter_map(|(i, n)| {
+                .map(|(i, n)| {
                     let is_optional: bool = i + 1 > node_index;
                     match n {
-                        BrigadierTreeNode::Alias { .. } => None,
                         BrigadierTreeNode::Argument { name, parser, .. } => {
-                            Some(CommandToken::Argument {
+                            CommandToken::Argument {
                                 name: name.clone(),
                                 data_type: parser.clone(),
                                 is_optional,
-                            })
+                            }
                         }
-                        BrigadierTreeNode::Enum { values, .. } => Some(CommandToken::Enum {
+                        BrigadierTreeNode::Enum { values, .. } => CommandToken::Enum {
                             values: values.clone(),
                             is_optional,
-                        }),
-                        BrigadierTreeNode::Literal { name, .. } => Some(CommandToken::Literal {
+                        },
+                        BrigadierTreeNode::Literal { name, .. } => CommandToken::Literal {
                             value: name.clone(),
                             is_optional,
-                        }),
+                        },
                     }
                 })
                 .collect(),
         );
     }
-    if let Some(children) = children_to_iterate {
-        for child in children {
-            list_command_variants(child, &branch_copy, commands);
-        }
+    for child in children_to_iterate {
+        list_command_variants(child, &branch_copy, commands);
     }
 }
 
