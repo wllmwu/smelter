@@ -24,25 +24,31 @@ struct BrigadierJsonNode {
 }
 
 #[derive(Debug)]
+enum BrigadierTreeNodeChildren {
+    Nodes(BTreeSet<BrigadierTreeNode>),
+    Redirect(Vec<String>),
+}
+
+#[derive(Debug)]
 enum BrigadierTreeNode {
     Argument {
         name: String,
         executable: bool,
         parser: String,
         properties: Option<BTreeMap<String, serde_json::Value>>,
-        children: BTreeSet<BrigadierTreeNode>,
+        children: BrigadierTreeNodeChildren,
     },
     Enum {
         /** Only used for sorting nodes alphabetically. */
         name: String,
         values: Vec<String>,
         executable: bool,
-        children: BTreeSet<BrigadierTreeNode>,
+        children: BrigadierTreeNodeChildren,
     },
     Literal {
         name: String,
         executable: bool,
-        children: BTreeSet<BrigadierTreeNode>,
+        children: BrigadierTreeNodeChildren,
     },
 }
 
@@ -80,11 +86,54 @@ impl BrigadierTreeNode {
         }
     }
 
-    fn get_children(&self) -> &BTreeSet<BrigadierTreeNode> {
+    fn get_children_or_redirect(&self) -> &BrigadierTreeNodeChildren {
         match self {
             BrigadierTreeNode::Argument { children, .. } => children,
             BrigadierTreeNode::Enum { children, .. } => children,
             BrigadierTreeNode::Literal { children, .. } => children,
+        }
+    }
+
+    fn get_children(&self) -> Option<&BTreeSet<BrigadierTreeNode>> {
+        match self.get_children_or_redirect() {
+            BrigadierTreeNodeChildren::Nodes(nodes) => Some(nodes),
+            BrigadierTreeNodeChildren::Redirect(..) => None,
+        }
+    }
+
+    fn clone(&self, children: BrigadierTreeNodeChildren) -> Self {
+        match self {
+            BrigadierTreeNode::Argument {
+                name,
+                executable,
+                parser,
+                properties,
+                ..
+            } => BrigadierTreeNode::Argument {
+                name: name.clone(),
+                executable: executable.clone(),
+                parser: parser.clone(),
+                properties: properties.clone(),
+                children,
+            },
+            BrigadierTreeNode::Enum {
+                name,
+                values,
+                executable,
+                ..
+            } => BrigadierTreeNode::Enum {
+                name: name.clone(),
+                values: values.clone(),
+                executable: executable.clone(),
+                children,
+            },
+            BrigadierTreeNode::Literal {
+                name, executable, ..
+            } => BrigadierTreeNode::Literal {
+                name: name.clone(),
+                executable: executable.clone(),
+                children,
+            },
         }
     }
 }
@@ -136,13 +185,17 @@ fn to_brigadier_tree_node(
     json_node: &BrigadierJsonNode,
     depth: u32,
 ) -> BrigadierTreeNode {
-    let children: BTreeSet<BrigadierTreeNode> = if let Some(json_children) = &json_node.children {
-        json_children
-            .iter()
-            .map(|(name, child)| to_brigadier_tree_node(name, child, depth + 1))
-            .collect()
+    let children: BrigadierTreeNodeChildren = if let Some(json_children) = &json_node.children {
+        BrigadierTreeNodeChildren::Nodes(
+            json_children
+                .iter()
+                .map(|(name, child)| to_brigadier_tree_node(name, child, depth + 1))
+                .collect(),
+        )
+    } else if let Some(path) = &json_node.redirect {
+        BrigadierTreeNodeChildren::Redirect(path.clone())
     } else {
-        BTreeSet::new()
+        BrigadierTreeNodeChildren::Nodes(BTreeSet::new())
     };
 
     let name: String = name.clone();
@@ -180,7 +233,15 @@ fn to_brigadier_tree(json: BrigadierJsonNode) -> BrigadierTree {
 }
 
 fn consolidate_literals_into_enums_inner(node: &BrigadierTreeNode) -> (BrigadierTreeNode, String) {
-    let children: &BTreeSet<BrigadierTreeNode> = node.get_children();
+    let children: &BTreeSet<BrigadierTreeNode> = match node.get_children_or_redirect() {
+        BrigadierTreeNodeChildren::Nodes(nodes) => nodes,
+        BrigadierTreeNodeChildren::Redirect(path) => {
+            return (
+                node.clone(BrigadierTreeNodeChildren::Redirect(path.clone())),
+                format!("->{}", path.join(",")),
+            );
+        }
+    };
     let mut new_children_and_subtrees: BTreeSet<(BrigadierTreeNode, String)> = BTreeSet::new();
     let mut merge_candidates: HashMap<(String, bool), Vec<BrigadierTreeNode>> = HashMap::new();
     for child in children {
@@ -207,7 +268,7 @@ fn consolidate_literals_into_enums_inner(node: &BrigadierTreeNode) -> (Brigadier
         } else {
             let enum_values: Vec<String> =
                 candidates.iter().map(|n| n.get_name().clone()).collect();
-            let enum_children: BTreeSet<BrigadierTreeNode> = match candidates.pop().unwrap() {
+            let enum_children: BrigadierTreeNodeChildren = match candidates.pop().unwrap() {
                 BrigadierTreeNode::Literal { children, .. } => children,
                 _ => panic!("Expected merge candidates to all be literals"),
             };
@@ -230,39 +291,7 @@ fn consolidate_literals_into_enums_inner(node: &BrigadierTreeNode) -> (Brigadier
         subtrees.push(format!("{}[{}]", new_child_canon, new_child_subtrees));
     }
     (
-        match node {
-            BrigadierTreeNode::Argument {
-                name,
-                executable,
-                parser,
-                properties,
-                ..
-            } => BrigadierTreeNode::Argument {
-                name: name.clone(),
-                executable: executable.clone(),
-                parser: parser.clone(),
-                properties: properties.clone(),
-                children: new_children,
-            },
-            BrigadierTreeNode::Enum {
-                name,
-                values,
-                executable,
-                ..
-            } => BrigadierTreeNode::Enum {
-                name: name.clone(),
-                values: values.clone(),
-                executable: executable.clone(),
-                children: new_children,
-            },
-            BrigadierTreeNode::Literal {
-                name, executable, ..
-            } => BrigadierTreeNode::Literal {
-                name: name.clone(),
-                executable: executable.clone(),
-                children: new_children,
-            },
-        },
+        node.clone(BrigadierTreeNodeChildren::Nodes(new_children)),
         subtrees.join(";"),
     )
 }
@@ -284,23 +313,27 @@ fn list_command_variants(
 ) {
     let mut branch_copy: Vec<&BrigadierTreeNode> = branch.clone();
     branch_copy.push(node);
-    let mut children_to_iterate: &BTreeSet<BrigadierTreeNode> = node.get_children();
+    let mut children_to_iterate: Option<&BTreeSet<BrigadierTreeNode>> = node.get_children();
     if node.is_executable() {
         // Include consecutive descendants which are executable and single children as optional parameters
         let node_index: usize = branch_copy.len() - 1;
-        let mut optional_candidate: &BrigadierTreeNode = node;
+        let mut branch_last_node: &BrigadierTreeNode = node;
         loop {
-            let children = optional_candidate.get_children();
+            let children: &BTreeSet<BrigadierTreeNode> = match branch_last_node.get_children() {
+                Some(nodes) => nodes,
+                None => break,
+            };
             if children.len() != 1 {
                 break;
             }
-            optional_candidate = children.first().unwrap();
+            let optional_candidate: &BrigadierTreeNode = children.first().unwrap();
             if !optional_candidate.is_executable() {
                 break;
             }
             branch_copy.push(optional_candidate);
-            children_to_iterate = optional_candidate.get_children();
+            branch_last_node = optional_candidate;
         }
+        children_to_iterate = branch_last_node.get_children();
 
         let command_variants = commands
             .get_mut(branch_copy.first().unwrap().get_name())
@@ -332,8 +365,10 @@ fn list_command_variants(
                 .collect(),
         );
     }
-    for child in children_to_iterate {
-        list_command_variants(child, &branch_copy, commands);
+    if let Some(children) = children_to_iterate {
+        for child in children {
+            list_command_variants(child, &branch_copy, commands);
+        }
     }
 }
 
