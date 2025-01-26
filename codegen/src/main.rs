@@ -136,6 +136,14 @@ impl BrigadierTreeNode {
             },
         }
     }
+
+    fn is_followed_by_any_command(&self) -> bool {
+        !self.is_executable()
+            && match self.get_children_or_redirect() {
+                BrigadierTreeNodeChildren::Nodes(nodes) => nodes.is_empty(),
+                BrigadierTreeNodeChildren::Redirect(..) => false,
+            }
+    }
 }
 
 impl PartialEq for BrigadierTreeNode {
@@ -314,7 +322,9 @@ fn list_command_variants(
     let mut branch_copy: Vec<&BrigadierTreeNode> = branch.clone();
     branch_copy.push(node);
     let mut children_to_iterate: Option<&BTreeSet<BrigadierTreeNode>> = node.get_children();
-    if node.is_executable() {
+    let command_name: &String = branch_copy.first().unwrap().get_name();
+
+    if node.is_executable() || node.is_followed_by_any_command() {
         // Include consecutive descendants which are executable and single children as optional parameters
         let node_index: usize = branch_copy.len() - 1;
         let mut branch_last_node: &BrigadierTreeNode = node;
@@ -335,36 +345,40 @@ fn list_command_variants(
         }
         children_to_iterate = branch_last_node.get_children();
 
-        let command_variants = commands
-            .get_mut(branch_copy.first().unwrap().get_name())
-            .unwrap();
-        command_variants.push(
-            branch_copy[1..]
-                .iter()
-                .enumerate()
-                .map(|(i, n)| {
-                    let is_optional: bool = i + 1 > node_index;
-                    match n {
-                        BrigadierTreeNode::Argument { name, parser, .. } => {
-                            CommandToken::Argument {
-                                name: name.clone(),
-                                data_type: parser.clone(),
-                                is_optional,
-                            }
-                        }
-                        BrigadierTreeNode::Enum { values, .. } => CommandToken::Enum {
-                            values: values.clone(),
-                            is_optional,
-                        },
-                        BrigadierTreeNode::Literal { name, .. } => CommandToken::Literal {
-                            value: name.clone(),
-                            is_optional,
-                        },
-                    }
-                })
-                .collect(),
-        );
+        let mut command_tokens: Vec<CommandToken> = branch_copy[1..]
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let is_optional: bool = i + 1 > node_index;
+                match n {
+                    BrigadierTreeNode::Argument { name, parser, .. } => CommandToken::Argument {
+                        name: name.clone(),
+                        data_type: parser.clone(),
+                        is_optional,
+                    },
+                    BrigadierTreeNode::Enum { values, .. } => CommandToken::Enum {
+                        values: values.clone(),
+                        is_optional,
+                    },
+                    BrigadierTreeNode::Literal { name, .. } => CommandToken::Literal {
+                        value: name.clone(),
+                        is_optional,
+                    },
+                }
+            })
+            .collect();
+        if branch_last_node.is_followed_by_any_command() {
+            command_tokens.push(CommandToken::Argument {
+                name: String::from("callback"),
+                data_type: String::from("TODO"),
+                is_optional: false,
+            });
+        }
+
+        let command_variants: &mut Vec<Vec<CommandToken>> = commands.get_mut(command_name).unwrap();
+        command_variants.push(command_tokens);
     }
+
     if let Some(children) = children_to_iterate {
         for child in children {
             list_command_variants(child, &branch_copy, commands);
