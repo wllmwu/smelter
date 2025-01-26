@@ -314,6 +314,45 @@ fn consolidate_literals_into_enums(tree: BrigadierTree) -> BrigadierTree {
     }
 }
 
+fn handle_execute_command_inner(node: &BrigadierTreeNode) -> BrigadierTreeNode {
+    let new_children: BrigadierTreeNodeChildren = match node.get_children_or_redirect() {
+        BrigadierTreeNodeChildren::Nodes(nodes) => BrigadierTreeNodeChildren::Nodes(
+            nodes
+                .iter()
+                .map(|child| handle_execute_command_inner(child))
+                .collect(),
+        ),
+        BrigadierTreeNodeChildren::Redirect(path) => {
+            let mut new_nodes: BTreeSet<BrigadierTreeNode> = BTreeSet::new();
+            if path.first().unwrap() == "execute" {
+                new_nodes.insert(BrigadierTreeNode::Literal {
+                    name: String::from("run"),
+                    executable: false,
+                    children: BrigadierTreeNodeChildren::Nodes(BTreeSet::new()),
+                });
+            }
+            BrigadierTreeNodeChildren::Nodes(new_nodes)
+        }
+    };
+    node.clone(new_children)
+}
+
+fn handle_execute_command(tree: BrigadierTree) -> BrigadierTree {
+    BrigadierTree {
+        commands: tree
+            .commands
+            .into_iter()
+            .map(|command| {
+                if command.get_name() == "execute" {
+                    handle_execute_command_inner(&command)
+                } else {
+                    command
+                }
+            })
+            .collect(),
+    }
+}
+
 fn list_command_variants(
     node: &BrigadierTreeNode,
     branch: &Vec<&BrigadierTreeNode>,
@@ -553,11 +592,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let json: BrigadierJsonNode = res.json()?;
 
-    let tree: BrigadierTree = consolidate_literals_into_enums(to_brigadier_tree(json));
-
-    // Optimizations:
-    // 1. Merge sibling literals that have same subtrees
-    // 2. Use optional parameters for consecutive executable nodes
+    let tree: BrigadierTree =
+        handle_execute_command(consolidate_literals_into_enums(to_brigadier_tree(json)));
 
     let commands: BTreeMap<String, Vec<Vec<CommandToken>>> = to_commands(tree);
 
