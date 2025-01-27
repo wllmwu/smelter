@@ -175,7 +175,7 @@ struct BrigadierTree {
 enum CommandToken {
     Argument {
         name: String,
-        data_type: String,
+        parser: String,
         is_optional: bool,
     },
     Enum {
@@ -256,7 +256,7 @@ fn consolidate_literals_into_enums_inner(node: &BrigadierTreeNode) -> (Brigadier
         let (new_child, new_child_subtrees_canon) = consolidate_literals_into_enums_inner(child);
         match new_child {
             BrigadierTreeNode::Literal { .. } => {
-                let key = (new_child_subtrees_canon, new_child.is_executable());
+                let key: (String, bool) = (new_child_subtrees_canon, new_child.is_executable());
                 if !merge_candidates.contains_key(&key) {
                     merge_candidates.insert(key.clone(), Vec::new());
                 }
@@ -294,7 +294,7 @@ fn consolidate_literals_into_enums_inner(node: &BrigadierTreeNode) -> (Brigadier
     let mut new_children: BTreeSet<BrigadierTreeNode> = BTreeSet::new();
     let mut subtrees: Vec<String> = Vec::new();
     for (new_child, new_child_subtrees) in new_children_and_subtrees.into_iter() {
-        let new_child_canon = new_child.get_canonical_string();
+        let new_child_canon: String = new_child.get_canonical_string();
         new_children.insert(new_child);
         subtrees.push(format!("{}[{}]", new_child_canon, new_child_subtrees));
     }
@@ -392,7 +392,7 @@ fn list_command_variants(
                 match n {
                     BrigadierTreeNode::Argument { name, parser, .. } => CommandToken::Argument {
                         name: name.clone(),
-                        data_type: parser.clone(),
+                        parser: parser.clone(),
                         is_optional,
                     },
                     BrigadierTreeNode::Enum { values, .. } => CommandToken::Enum {
@@ -409,7 +409,7 @@ fn list_command_variants(
         if branch_last_node.is_followed_by_any_command() {
             command_tokens.push(CommandToken::Argument {
                 name: String::from("callback"),
-                data_type: String::from("TODO"),
+                parser: String::from("TODO"),
                 is_optional: false,
             });
         }
@@ -438,6 +438,7 @@ fn to_commands(tree: BrigadierTree) -> BTreeMap<String, Vec<Vec<CommandToken>>> 
 }
 
 // Static string array: https://stackoverflow.com/a/32383866
+// JavaScript reserved words: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Lexical_grammar#reserved_words
 static RESERVED_KEYWORDS_JAVASCRIPT: &[&str] = &[
     "break",
     "case",
@@ -530,14 +531,14 @@ fn emit_generated_typescript(commands: &BTreeMap<String, Vec<Vec<CommandToken>>>
                 .map(|token| match token {
                     CommandToken::Argument {
                         name,
-                        data_type,
+                        parser,
                         is_optional,
                     } => {
                         format!(
                             "{}{}: \"{}\"",
                             fix_identifier(name),
                             if *is_optional { "?" } else { "" },
-                            data_type
+                            parser
                         )
                     }
                     CommandToken::Enum {
