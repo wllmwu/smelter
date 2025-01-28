@@ -1,27 +1,14 @@
-use serde::Deserialize;
+use command_data::{
+    BrigadierJsonNode, BrigadierJsonNodeType, DataProvider, FileSystemDataCache,
+    McmetaRemoteRepository,
+};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
+    env,
     ops::RangeFrom,
 };
 
-#[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-enum BrigadierJsonNodeType {
-    Argument,
-    Literal,
-    Root,
-}
-
-#[derive(Debug, Deserialize)]
-struct BrigadierJsonNode {
-    #[serde(rename = "type")]
-    node_type: BrigadierJsonNodeType,
-    children: Option<BTreeMap<String, BrigadierJsonNode>>,
-    executable: Option<bool>,
-    parser: Option<String>,
-    properties: Option<BTreeMap<String, serde_json::Value>>,
-    redirect: Option<Vec<String>>,
-}
+mod command_data;
 
 #[derive(Debug)]
 enum BrigadierTreeNodeChildren {
@@ -536,7 +523,7 @@ fn emit_generated_typescript(commands: &BTreeMap<String, Vec<Vec<CommandToken>>>
                     } => {
                         format!(
                             "{}{}: \"{}\"",
-                            fix_identifier(name),
+                            fix_identifier(&name),
                             if *is_optional { "?" } else { "" },
                             parser
                         )
@@ -587,11 +574,27 @@ fn emit_generated_typescript(commands: &BTreeMap<String, Vec<Vec<CommandToken>>>
     }
 }
 
+/**
+ * args: version (or data file?), language(s?)
+ * 1. check if command data for specified version is already cached
+ * 2. if not, then download it from mcmeta repo
+ *    1. use github api to find commit in summary branch with version number in its message: https://docs.github.com/en/rest/commits/commits?apiVersion=2022-11-28#list-commits
+ *    2. download raw json file: https://raw.githubusercontent.com/misode/mcmeta/<commitsha>/commands/data.json
+ *    3. write file to local (gitignored) cache
+ * 3. construct brigadiertree from cached json for specified version
+ * 4. convert brigadiertree into map of command name to command variants (including optimizations)
+ * 5. write generated api for specified language to output directory
+ * after: manually review generated api, add missing arg type definitions + remove obsolete ones
+ */
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let res = reqwest::blocking::get(
-        "https://raw.githubusercontent.com/misode/mcmeta/refs/heads/summary/commands/data.json",
-    )?;
-    let json: BrigadierJsonNode = res.json()?;
+    let args: Vec<String> = env::args().collect();
+    let version: String = args[1].clone();
+    let data_provider: DataProvider = DataProvider {
+        cache: Box::new(FileSystemDataCache {
+            repository: Box::new(McmetaRemoteRepository),
+        }),
+    };
+    let json: BrigadierJsonNode = data_provider.get_command_data(version);
 
     let tree: BrigadierTree =
         handle_execute_command(consolidate_literals_into_enums(to_brigadier_tree(json)));
