@@ -1,7 +1,4 @@
-use command_data::{
-    BrigadierJsonNode, BrigadierJsonNodeType, DataProvider, FileSystemDataCache,
-    McmetaRemoteRepository,
-};
+use command_data::{BrigadierJsonNode, BrigadierJsonNodeType, DataProvider};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     env,
@@ -589,11 +586,7 @@ fn emit_generated_typescript(commands: &BTreeMap<String, Vec<Vec<CommandToken>>>
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let version: String = args[1].clone();
-    let data_provider: DataProvider = DataProvider {
-        cache: Box::new(FileSystemDataCache {
-            repository: Box::new(McmetaRemoteRepository),
-        }),
-    };
+    let data_provider: DataProvider = DataProvider::new();
     let json: BrigadierJsonNode = data_provider.get_command_data(version);
 
     let tree: BrigadierTree =

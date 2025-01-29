@@ -32,11 +32,11 @@ struct GithubListCommitsResponseItem {
     commit: GithubCommit,
 }
 
-pub trait DataRepository {
+trait DataRepository {
     fn fetch(&self, version: String) -> Option<String>;
 }
 
-pub struct McmetaRemoteRepository;
+struct McmetaRemoteRepository;
 
 impl DataRepository for McmetaRemoteRepository {
     fn fetch(&self, version: String) -> Option<String> {
@@ -67,12 +67,12 @@ impl DataRepository for McmetaRemoteRepository {
     }
 }
 
-pub trait DataCache {
+trait DataCache {
     fn get(&self, version: String) -> String;
 }
 
-pub struct FileSystemDataCache {
-    pub repository: Box<dyn DataRepository>,
+struct FileSystemDataCache {
+    repository: Box<dyn DataRepository>,
 }
 
 impl DataCache for FileSystemDataCache {
@@ -92,10 +92,18 @@ impl DataCache for FileSystemDataCache {
 }
 
 pub struct DataProvider {
-    pub cache: Box<dyn DataCache>,
+    cache: Box<dyn DataCache>,
 }
 
 impl DataProvider {
+    pub fn new() -> Self {
+        Self {
+            cache: Box::new(FileSystemDataCache {
+                repository: Box::new(McmetaRemoteRepository),
+            }),
+        }
+    }
+
     pub fn get_command_data(&self, version: String) -> BrigadierJsonNode {
         let data: String = self.cache.get(version);
         serde_json::from_str(&data).unwrap()
