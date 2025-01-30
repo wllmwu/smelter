@@ -587,7 +587,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let version: String = args[1].clone();
     let data_provider: DataProvider = DataProvider::new();
-    let json: BrigadierJsonNode = data_provider.get_command_data(version);
+    let json: BrigadierJsonNode = data_provider.get_command_data(version)?;
 
     let tree: BrigadierTree =
         handle_execute_command(consolidate_literals_into_enums(to_brigadier_tree(json)));
