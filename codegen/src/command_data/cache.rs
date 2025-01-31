@@ -1,5 +1,6 @@
-use repository::{DataRepository, McmetaRemoteRepository, RepositoryError};
 use std::{error, fmt, fs, io};
+
+use repository::{DataRepository, McmetaRemoteRepository, RepositoryError};
 
 mod repository;
 

@@ -1,10 +1,11 @@
-use brigadier_tree::{BrigadierTree, BrigadierTreeNode, BrigadierTreeNodeChildren};
-use command_data::DataProvider;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     env,
     ops::RangeFrom,
 };
+
+use brigadier_tree::{BrigadierTree, BrigadierTreeNode, BrigadierTreeNodeChildren};
+use command_data::DataProvider;
 
 mod brigadier_tree;
 mod command_data;
