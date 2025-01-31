@@ -1,5 +1,5 @@
 use brigadier_tree::{BrigadierTree, BrigadierTreeNode, BrigadierTreeNodeChildren};
-use command_data::{BrigadierJsonNode, BrigadierJsonNodeType, DataProvider};
+use command_data::DataProvider;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     env,
@@ -24,58 +24,6 @@ enum CommandToken {
         value: String,
         is_optional: bool,
     },
-}
-
-fn to_brigadier_tree_node(
-    name: &String,
-    json_node: &BrigadierJsonNode,
-    depth: u32,
-) -> BrigadierTreeNode {
-    let children: BrigadierTreeNodeChildren = if let Some(json_children) = &json_node.children {
-        BrigadierTreeNodeChildren::Nodes(
-            json_children
-                .iter()
-                .map(|(name, child)| to_brigadier_tree_node(name, child, depth + 1))
-                .collect(),
-        )
-    } else if let Some(path) = &json_node.redirect {
-        BrigadierTreeNodeChildren::Redirect(path.clone())
-    } else {
-        BrigadierTreeNodeChildren::Nodes(BTreeSet::new())
-    };
-
-    let name: String = name.clone();
-    let executable: bool = json_node.executable.unwrap_or(false);
-    match json_node.node_type {
-        BrigadierJsonNodeType::Argument => BrigadierTreeNode::Argument {
-            name,
-            executable,
-            parser: json_node
-                .parser
-                .clone()
-                .expect("Argument node should have a parser"),
-            properties: json_node.properties.clone(),
-            children,
-        },
-        BrigadierJsonNodeType::Literal => BrigadierTreeNode::Literal {
-            name,
-            executable,
-            children,
-        },
-        BrigadierJsonNodeType::Root => panic!("Found a `type=root` node within the JSON tree"),
-    }
-}
-
-fn to_brigadier_tree(json: BrigadierJsonNode) -> BrigadierTree {
-    BrigadierTree {
-        commands: if let Some(ch) = &json.children {
-            ch.iter()
-                .map(|(name, child)| to_brigadier_tree_node(name, child, 1))
-                .collect()
-        } else {
-            BTreeSet::new()
-        },
-    }
 }
 
 fn consolidate_literals_into_enums_inner(node: &BrigadierTreeNode) -> (BrigadierTreeNode, String) {
@@ -440,11 +388,11 @@ fn emit_generated_typescript(commands: &BTreeMap<String, Vec<Vec<CommandToken>>>
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let version: String = args[1].clone();
-    let data_provider: DataProvider = DataProvider::new();
-    let json: BrigadierJsonNode = data_provider.get_command_data(version)?;
 
-    let tree: BrigadierTree =
-        handle_execute_command(consolidate_literals_into_enums(to_brigadier_tree(json)));
+    let data_provider: DataProvider = DataProvider::new();
+    let tree: BrigadierTree = data_provider.get_command_data(version)?;
+
+    let tree: BrigadierTree = handle_execute_command(consolidate_literals_into_enums(tree));
 
     let commands: BTreeMap<String, Vec<Vec<CommandToken>>> = to_commands(tree);
 
