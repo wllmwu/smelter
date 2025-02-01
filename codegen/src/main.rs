@@ -5,10 +5,10 @@ use std::{
 };
 
 use brigadier_tree::{BrigadierTree, BrigadierTreeNode, BrigadierTreeNodeChildren};
-use command_data::DataProvider;
+use tree_provider::TreeProvider;
 
 mod brigadier_tree;
-mod command_data;
+mod tree_provider;
 
 #[derive(Debug)]
 enum CommandToken {
@@ -390,8 +390,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let version: String = args[1].clone();
 
-    let data_provider: DataProvider = DataProvider::new();
-    let tree: BrigadierTree = data_provider.get_command_data(version)?;
+    let tree_provider: TreeProvider = TreeProvider::new();
+    let tree: BrigadierTree = tree_provider.get_command_tree(version)?;
 
     let tree: BrigadierTree = handle_execute_command(consolidate_literals_into_enums(tree));
 

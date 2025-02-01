@@ -12,24 +12,24 @@ mod cache;
 /* * * * Public interface * * * */
 
 #[derive(Debug)]
-pub enum DataProviderError {
+pub enum TreeProviderError {
     ConversionError(String),
     DeserializationError(serde_json::Error),
     RetrieveError(CacheError),
 }
 
-pub struct DataProvider {
+pub struct TreeProvider {
     cache: Box<dyn DataCache>,
 }
 
-impl DataProvider {
+impl TreeProvider {
     pub fn new() -> Self {
         Self {
             cache: Box::new(FileSystemDataCache::new()),
         }
     }
 
-    pub fn get_command_data(&self, version: String) -> Result<BrigadierTree, DataProviderError> {
+    pub fn get_command_tree(&self, version: String) -> Result<BrigadierTree, TreeProviderError> {
         let data: String = self.cache.get(version)?;
         let json: BrigadierJsonNode = serde_json::from_str(&data)?;
         Ok(BrigadierTree::try_from(json)?)
@@ -57,7 +57,7 @@ struct BrigadierJsonNode {
     redirect: Option<Vec<String>>,
 }
 
-impl fmt::Display for DataProviderError {
+impl fmt::Display for TreeProviderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ConversionError(msg) => {
@@ -73,7 +73,7 @@ impl fmt::Display for DataProviderError {
     }
 }
 
-impl error::Error for DataProviderError {
+impl error::Error for TreeProviderError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             Self::ConversionError(..) => None,
@@ -83,13 +83,13 @@ impl error::Error for DataProviderError {
     }
 }
 
-impl From<CacheError> for DataProviderError {
+impl From<CacheError> for TreeProviderError {
     fn from(value: CacheError) -> Self {
         Self::RetrieveError(value)
     }
 }
 
-impl From<serde_json::Error> for DataProviderError {
+impl From<serde_json::Error> for TreeProviderError {
     fn from(value: serde_json::Error) -> Self {
         Self::DeserializationError(value)
     }
@@ -99,13 +99,13 @@ fn to_brigadier_tree_node(
     name: &String,
     json_node: &BrigadierJsonNode,
     depth: u32,
-) -> Result<BrigadierTreeNode, DataProviderError> {
+) -> Result<BrigadierTreeNode, TreeProviderError> {
     let children: BrigadierTreeNodeChildren = if let Some(json_children) = &json_node.children {
         BrigadierTreeNodeChildren::Nodes(
             json_children
                 .iter()
                 .map(|(name, child)| to_brigadier_tree_node(name, child, depth + 1))
-                .collect::<Result<BTreeSet<BrigadierTreeNode>, DataProviderError>>()?,
+                .collect::<Result<BTreeSet<BrigadierTreeNode>, TreeProviderError>>()?,
         )
     } else if let Some(path) = &json_node.redirect {
         BrigadierTreeNodeChildren::Redirect(path.clone())
@@ -124,7 +124,7 @@ fn to_brigadier_tree_node(
                 properties: json_node.properties.clone(),
                 children,
             }),
-            None => Err(DataProviderError::ConversionError(String::from(
+            None => Err(TreeProviderError::ConversionError(String::from(
                 "Found a `type=argument` node without a `parser`.",
             ))),
         },
@@ -133,21 +133,21 @@ fn to_brigadier_tree_node(
             executable,
             children,
         }),
-        BrigadierJsonNodeType::Root => Err(DataProviderError::ConversionError(String::from(
+        BrigadierJsonNodeType::Root => Err(TreeProviderError::ConversionError(String::from(
             "Found a `type=root` node within the JSON tree.",
         ))),
     }
 }
 
 impl TryFrom<BrigadierJsonNode> for BrigadierTree {
-    type Error = DataProviderError;
+    type Error = TreeProviderError;
 
     fn try_from(value: BrigadierJsonNode) -> Result<Self, Self::Error> {
         Ok(Self {
             commands: if let Some(ch) = &value.children {
                 ch.iter()
                     .map(|(name, child)| to_brigadier_tree_node(name, child, 1))
-                    .collect::<Result<BTreeSet<BrigadierTreeNode>, DataProviderError>>()?
+                    .collect::<Result<BTreeSet<BrigadierTreeNode>, TreeProviderError>>()?
             } else {
                 BTreeSet::new()
             },
