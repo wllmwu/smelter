@@ -1,6 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::brigadier_tree::{BrigadierTree, BrigadierTreeNode, BrigadierTreeNodeChildren};
+use crate::brigadier_tree::{BrigadierTree, BrigadierTreeNode};
+
+mod optimizations;
 
 /* * * * Public interface * * * */
 
@@ -20,135 +22,35 @@ pub enum CommandToken {
     },
 }
 
-pub type CommandMap = BTreeMap<String, Vec<Vec<CommandToken>>>;
+pub type CommandVariant = Vec<CommandToken>;
+pub type CommandMap = BTreeMap<String, Vec<CommandVariant>>;
 
 impl From<BrigadierTree> for CommandMap {
     fn from(tree: BrigadierTree) -> Self {
-        map_commands(handle_execute_command(consolidate_literals_into_enums(
-            tree,
-        )))
+        map_commands(optimizations::handle_execute_command(
+            optimizations::consolidate_literals_into_enums(tree),
+        ))
     }
 }
 
 /* * * * Private implementation * * * */
 
-fn consolidate_literals_into_enums_inner(node: &BrigadierTreeNode) -> (BrigadierTreeNode, String) {
-    let children: &BTreeSet<BrigadierTreeNode> = match node.get_children_or_redirect() {
-        BrigadierTreeNodeChildren::Nodes(nodes) => nodes,
-        BrigadierTreeNodeChildren::Redirect(path) => {
-            return (
-                node.clone(BrigadierTreeNodeChildren::Redirect(path.clone())),
-                format!("->{}", path.join(",")),
-            );
-        }
-    };
-    let mut new_children_and_subtrees: BTreeSet<(BrigadierTreeNode, String)> = BTreeSet::new();
-    let mut merge_candidates: HashMap<(String, bool), Vec<BrigadierTreeNode>> = HashMap::new();
-    for child in children {
-        let (new_child, new_child_subtrees_canon) = consolidate_literals_into_enums_inner(child);
-        match new_child {
-            BrigadierTreeNode::Literal { .. } => {
-                let key: (String, bool) = (new_child_subtrees_canon, new_child.is_executable());
-                if !merge_candidates.contains_key(&key) {
-                    merge_candidates.insert(key.clone(), Vec::new());
-                }
-                merge_candidates.get_mut(&key).unwrap().push(new_child);
-            }
-            _ => {
-                new_children_and_subtrees.insert((new_child, new_child_subtrees_canon));
-            }
+fn map_commands(tree: BrigadierTree) -> CommandMap {
+    let mut commands: CommandMap = CommandMap::new();
+    for node in &tree.commands {
+        commands.insert(node.get_name().clone(), Vec::new());
+        list_command_variants(&node, &Vec::new(), &mut commands);
+        if commands.get(node.get_name()).unwrap().is_empty() {
+            commands.remove(node.get_name());
         }
     }
-    for ((subtree_canon, is_executable), candidates) in merge_candidates.iter_mut() {
-        let subtree_canon: String = subtree_canon.clone();
-        if candidates.is_empty() {
-            continue;
-        } else if candidates.len() == 1 {
-            new_children_and_subtrees.insert((candidates.pop().unwrap(), subtree_canon));
-        } else {
-            let enum_values: Vec<String> =
-                candidates.iter().map(|n| n.get_name().clone()).collect();
-            let enum_children: BrigadierTreeNodeChildren = match candidates.pop().unwrap() {
-                BrigadierTreeNode::Literal { children, .. } => children,
-                _ => panic!("Expected merge candidates to all be literals"),
-            };
-            new_children_and_subtrees.insert((
-                BrigadierTreeNode::Enum {
-                    name: enum_values.join("|"),
-                    values: enum_values,
-                    executable: is_executable.clone(),
-                    children: enum_children,
-                },
-                subtree_canon,
-            ));
-        }
-    }
-    let mut new_children: BTreeSet<BrigadierTreeNode> = BTreeSet::new();
-    let mut subtrees: Vec<String> = Vec::new();
-    for (new_child, new_child_subtrees) in new_children_and_subtrees.into_iter() {
-        let new_child_canon: String = new_child.get_canonical_string();
-        new_children.insert(new_child);
-        subtrees.push(format!("{}[{}]", new_child_canon, new_child_subtrees));
-    }
-    (
-        node.clone(BrigadierTreeNodeChildren::Nodes(new_children)),
-        subtrees.join(";"),
-    )
-}
-
-fn consolidate_literals_into_enums(tree: BrigadierTree) -> BrigadierTree {
-    BrigadierTree {
-        commands: tree
-            .commands
-            .iter()
-            .map(|node| consolidate_literals_into_enums_inner(node).0)
-            .collect(),
-    }
-}
-
-fn handle_execute_command_inner(node: &BrigadierTreeNode) -> BrigadierTreeNode {
-    let new_children: BrigadierTreeNodeChildren = match node.get_children_or_redirect() {
-        BrigadierTreeNodeChildren::Nodes(nodes) => BrigadierTreeNodeChildren::Nodes(
-            nodes
-                .iter()
-                .map(|child| handle_execute_command_inner(child))
-                .collect(),
-        ),
-        BrigadierTreeNodeChildren::Redirect(path) => {
-            let mut new_nodes: BTreeSet<BrigadierTreeNode> = BTreeSet::new();
-            if path.first().unwrap() == "execute" {
-                new_nodes.insert(BrigadierTreeNode::Literal {
-                    name: String::from("run"),
-                    executable: false,
-                    children: BrigadierTreeNodeChildren::Nodes(BTreeSet::new()),
-                });
-            }
-            BrigadierTreeNodeChildren::Nodes(new_nodes)
-        }
-    };
-    node.clone(new_children)
-}
-
-fn handle_execute_command(tree: BrigadierTree) -> BrigadierTree {
-    BrigadierTree {
-        commands: tree
-            .commands
-            .into_iter()
-            .map(|command| {
-                if command.get_name() == "execute" {
-                    handle_execute_command_inner(&command)
-                } else {
-                    command
-                }
-            })
-            .collect(),
-    }
+    commands
 }
 
 fn list_command_variants(
     node: &BrigadierTreeNode,
     branch: &Vec<&BrigadierTreeNode>,
-    commands: &mut BTreeMap<String, Vec<Vec<CommandToken>>>,
+    commands: &mut CommandMap,
 ) {
     let mut branch_copy: Vec<&BrigadierTreeNode> = branch.clone();
     branch_copy.push(node);
@@ -176,7 +78,7 @@ fn list_command_variants(
         }
         children_to_iterate = branch_last_node.get_children();
 
-        let mut command_tokens: Vec<CommandToken> = branch_copy[1..]
+        let mut command_tokens: CommandVariant = branch_copy[1..]
             .iter()
             .enumerate()
             .map(|(i, n)| {
@@ -206,7 +108,7 @@ fn list_command_variants(
             });
         }
 
-        let command_variants: &mut Vec<Vec<CommandToken>> = commands.get_mut(command_name).unwrap();
+        let command_variants: &mut Vec<CommandVariant> = commands.get_mut(command_name).unwrap();
         command_variants.push(command_tokens);
     }
 
@@ -215,16 +117,4 @@ fn list_command_variants(
             list_command_variants(child, &branch_copy, commands);
         }
     }
-}
-
-fn map_commands(tree: BrigadierTree) -> CommandMap {
-    let mut commands: CommandMap = CommandMap::new();
-    for node in &tree.commands {
-        commands.insert(node.get_name().clone(), Vec::new());
-        list_command_variants(&node, &Vec::new(), &mut commands);
-        if commands.get(node.get_name()).unwrap().is_empty() {
-            commands.remove(node.get_name());
-        }
-    }
-    commands
 }
