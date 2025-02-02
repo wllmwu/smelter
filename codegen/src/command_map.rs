@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::brigadier_tree::{BrigadierTree, BrigadierTreeNode};
 
-mod optimizations;
+mod preprocessors;
 
 /* * * * Public interface * * * */
 
@@ -27,7 +27,7 @@ pub type CommandMap = BTreeMap<String, Vec<CommandVariant>>;
 
 impl From<BrigadierTree> for CommandMap {
     fn from(tree: BrigadierTree) -> Self {
-        map_commands(optimizations::handle_execute_command(tree))
+        map_commands(preprocessors::handle_execute_command(tree))
     }
 }
 

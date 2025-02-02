@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::brigadier_tree::{BrigadierTree, BrigadierTreeNode, BrigadierTreeNodeChildren};
 
-pub(in crate::command_map) fn handle_execute_command(tree: BrigadierTree) -> BrigadierTree {
+pub(super) fn handle_execute_command(tree: BrigadierTree) -> BrigadierTree {
     BrigadierTree {
         commands: tree
             .commands
