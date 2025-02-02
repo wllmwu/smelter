@@ -1,6 +1,7 @@
+use std::{error, fmt};
+
 use reqwest::blocking::{Client, Response};
 use serde::Deserialize;
-use std::{error, fmt};
 
 /* * * * Public interface * * * */
 

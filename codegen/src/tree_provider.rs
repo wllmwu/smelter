@@ -1,20 +1,19 @@
-use serde::Deserialize;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    error, fmt,
-};
+use std::{error, fmt};
 
-use crate::brigadier_tree::{BrigadierTree, BrigadierTreeNode, BrigadierTreeNodeChildren};
+use brigadier_json::{BrigadierJsonNode, ConversionError};
 use cache::{CacheError, DataCache, FileSystemDataCache};
 
+use crate::brigadier_tree::BrigadierTree;
+
+mod brigadier_json;
 mod cache;
+mod postprocessors;
 
 /* * * * Public interface * * * */
 
 #[derive(Debug)]
 pub enum TreeProviderError {
-    ConversionError(String),
-    DeserializationError(serde_json::Error),
+    ConversionError(ConversionError),
     RetrieveError(CacheError),
 }
 
@@ -31,40 +30,19 @@ impl TreeProvider {
 
     pub fn get_command_tree(&self, version: String) -> Result<BrigadierTree, TreeProviderError> {
         let data: String = self.cache.get(version)?;
-        let json: BrigadierJsonNode = serde_json::from_str(&data)?;
-        Ok(BrigadierTree::try_from(json)?)
+        let json: BrigadierJsonNode = BrigadierJsonNode::try_from(data)?;
+        let tree: BrigadierTree = BrigadierTree::try_from(json)?;
+        Ok(postprocessors::consolidate_literals_into_enums(tree))
     }
 }
 
 /* * * * Private implementation * * * */
 
-#[derive(Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-enum BrigadierJsonNodeType {
-    Argument,
-    Literal,
-    Root,
-}
-
-#[derive(Deserialize)]
-struct BrigadierJsonNode {
-    #[serde(rename = "type")]
-    node_type: BrigadierJsonNodeType,
-    children: Option<BTreeMap<String, BrigadierJsonNode>>,
-    executable: Option<bool>,
-    parser: Option<String>,
-    properties: Option<BTreeMap<String, serde_json::Value>>,
-    redirect: Option<Vec<String>>,
-}
-
 impl fmt::Display for TreeProviderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ConversionError(msg) => {
-                write!(f, "conversion from JSON to BrigadierTree failed: {msg}")
-            }
-            Self::DeserializationError(e) => {
-                write!(f, "JSON deserialization failed: {e}")
+            Self::ConversionError(e) => {
+                write!(f, "conversion from JSON to BrigadierTree failed: {e}")
             }
             Self::RetrieveError(e) => {
                 write!(f, "data retrieval failed: {e}")
@@ -76,8 +54,7 @@ impl fmt::Display for TreeProviderError {
 impl error::Error for TreeProviderError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
-            Self::ConversionError(..) => None,
-            Self::DeserializationError(e) => Some(e),
+            Self::ConversionError(e) => Some(e),
             Self::RetrieveError(e) => Some(e),
         }
     }
@@ -89,68 +66,8 @@ impl From<CacheError> for TreeProviderError {
     }
 }
 
-impl From<serde_json::Error> for TreeProviderError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::DeserializationError(value)
-    }
-}
-
-fn to_brigadier_tree_node(
-    name: &String,
-    json_node: &BrigadierJsonNode,
-    depth: u32,
-) -> Result<BrigadierTreeNode, TreeProviderError> {
-    let children: BrigadierTreeNodeChildren = if let Some(json_children) = &json_node.children {
-        BrigadierTreeNodeChildren::Nodes(
-            json_children
-                .iter()
-                .map(|(name, child)| to_brigadier_tree_node(name, child, depth + 1))
-                .collect::<Result<BTreeSet<BrigadierTreeNode>, TreeProviderError>>()?,
-        )
-    } else if let Some(path) = &json_node.redirect {
-        BrigadierTreeNodeChildren::Redirect(path.clone())
-    } else {
-        BrigadierTreeNodeChildren::Nodes(BTreeSet::new())
-    };
-
-    let name: String = name.clone();
-    let executable: bool = json_node.executable.unwrap_or(false);
-    match json_node.node_type {
-        BrigadierJsonNodeType::Argument => match json_node.parser.clone() {
-            Some(parser) => Ok(BrigadierTreeNode::Argument {
-                name,
-                executable,
-                parser,
-                properties: json_node.properties.clone(),
-                children,
-            }),
-            None => Err(TreeProviderError::ConversionError(String::from(
-                "Found a `type=argument` node without a `parser`.",
-            ))),
-        },
-        BrigadierJsonNodeType::Literal => Ok(BrigadierTreeNode::Literal {
-            name,
-            executable,
-            children,
-        }),
-        BrigadierJsonNodeType::Root => Err(TreeProviderError::ConversionError(String::from(
-            "Found a `type=root` node within the JSON tree.",
-        ))),
-    }
-}
-
-impl TryFrom<BrigadierJsonNode> for BrigadierTree {
-    type Error = TreeProviderError;
-
-    fn try_from(value: BrigadierJsonNode) -> Result<Self, Self::Error> {
-        Ok(Self {
-            commands: if let Some(ch) = &value.children {
-                ch.iter()
-                    .map(|(name, child)| to_brigadier_tree_node(name, child, 1))
-                    .collect::<Result<BTreeSet<BrigadierTreeNode>, TreeProviderError>>()?
-            } else {
-                BTreeSet::new()
-            },
-        })
+impl From<ConversionError> for TreeProviderError {
+    fn from(value: ConversionError) -> Self {
+        Self::ConversionError(value)
     }
 }

@@ -27,9 +27,7 @@ pub type CommandMap = BTreeMap<String, Vec<CommandVariant>>;
 
 impl From<BrigadierTree> for CommandMap {
     fn from(tree: BrigadierTree) -> Self {
-        map_commands(optimizations::handle_execute_command(
-            optimizations::consolidate_literals_into_enums(tree),
-        ))
+        map_commands(optimizations::handle_execute_command(tree))
     }
 }
 

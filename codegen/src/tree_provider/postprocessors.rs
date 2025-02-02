@@ -2,9 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::brigadier_tree::{BrigadierTree, BrigadierTreeNode, BrigadierTreeNodeChildren};
 
-pub(in crate::command_map) fn consolidate_literals_into_enums(
-    tree: BrigadierTree,
-) -> BrigadierTree {
+pub(super) fn consolidate_literals_into_enums(tree: BrigadierTree) -> BrigadierTree {
     BrigadierTree {
         commands: tree
             .commands
