@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::Parser as CliParser;
 use oxc_allocator::Allocator;
 use oxc_parser::Parser;
+use oxc_semantic::SemanticBuilder;
 use oxc_span::SourceType;
 
 #[derive(CliParser)]
@@ -21,6 +22,30 @@ fn main() -> Result<()> {
     let allocator = Allocator::default();
     let parser_result = Parser::new(&allocator, &content, source_type).parse();
     let program = parser_result.program;
+
+    if !parser_result.errors.is_empty() {
+        let error_messages = parser_result
+            .errors
+            .into_iter()
+            .map(|error| format!("{:?}", error.with_source_code(content.clone())))
+            .collect::<Vec<String>>()
+            .join("\n");
+        println!("Parse errors:\n{error_messages}");
+    }
+
+    let semantic_result = SemanticBuilder::new()
+        .with_check_syntax_error(true)
+        .build(&program);
+
+    if !semantic_result.errors.is_empty() {
+        let error_messages = semantic_result
+            .errors
+            .into_iter()
+            .map(|error| format!("{:?}", error.with_source_code(content.clone())))
+            .collect::<Vec<String>>()
+            .join("\n");
+        println!("Semantic errors:\n{error_messages}");
+    }
 
     println!("{:#?}", program);
 
