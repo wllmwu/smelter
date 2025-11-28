@@ -1,3 +1,11 @@
+use clap::Parser;
+
+#[derive(Parser)]
+struct CliArguments {
+    path: std::path::PathBuf,
+}
+
 fn main() {
-    println!("Hello, world!");
+    let args = CliArguments::parse();
+    println!("path: {:?}", args.path);
 }
