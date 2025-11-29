@@ -161,7 +161,16 @@ fn main() -> Result<()> {
     let smelter_program = convert_program(&program);
 
     let data_pack = convert_data_pack(&smelter_program);
-    println!("{:?}", data_pack);
+
+    for (index, file) in data_pack.files.iter().enumerate() {
+        let path = format!("out{index}.mcfunction");
+        let contents = match file {
+            DataPackFile::Mcfunction { contents } => contents,
+        };
+        std::fs::write(&path, contents)
+            .with_context(|| format!("Couldn't write file `{}`", &path))?;
+    }
+    println!("Done");
 
     Ok(())
 }
