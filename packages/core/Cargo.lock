@@ -273,6 +273,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c6901729fa79e91a0913333229e9ca5dc725089d1c363b2f4b4760709dc4a52"
 
 [[package]]
+name = "oxc"
+version = "0.99.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32064086808afae7a16cbe206d47c2052292dbf5716d891e1a0096eda7d3a365"
+dependencies = [
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_diagnostics",
+ "oxc_parser",
+ "oxc_regular_expression",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_syntax",
+]
+
+[[package]]
 name = "oxc-miette"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -637,10 +653,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "oxc_allocator",
- "oxc_parser",
- "oxc_semantic",
- "oxc_span",
+ "oxc",
 ]
 
 [[package]]

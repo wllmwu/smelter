@@ -1,13 +1,91 @@
 use anyhow::{Context, Result};
 use clap::Parser as CliParser;
-use oxc_allocator::Allocator;
-use oxc_parser::Parser;
-use oxc_semantic::SemanticBuilder;
-use oxc_span::SourceType;
+use oxc::{
+    allocator::Allocator,
+    ast::ast::{Argument, Expression, Function, Program, Statement},
+    parser::Parser,
+    semantic::SemanticBuilder,
+    span::SourceType,
+};
 
 #[derive(CliParser)]
 struct CliArguments {
     path: std::path::PathBuf,
+}
+
+#[derive(Debug)]
+enum SmelterExpression {
+    ExecuteCommand { tail: String },
+}
+
+#[derive(Debug)]
+struct SmelterFunction {
+    body: Vec<SmelterExpression>,
+}
+
+#[derive(Debug)]
+struct SmelterProgram {
+    body: Vec<SmelterFunction>,
+}
+
+fn convert_program(program: &Program) -> SmelterProgram {
+    SmelterProgram {
+        body: program
+            .body
+            .iter()
+            .filter_map(|statement| match statement {
+                Statement::FunctionDeclaration(function_stmt) => {
+                    Some(convert_function(function_stmt))
+                }
+                _ => None,
+            })
+            .collect::<Vec<SmelterFunction>>(),
+    }
+}
+
+fn convert_function(function: &Function) -> SmelterFunction {
+    if let Some(body) = &function.body {
+        SmelterFunction {
+            body: body
+                .statements
+                .iter()
+                .filter_map(|statement| convert_statement(statement))
+                .collect::<Vec<SmelterExpression>>(),
+        }
+    } else {
+        SmelterFunction { body: Vec::new() }
+    }
+}
+
+fn convert_statement(statement: &Statement) -> Option<SmelterExpression> {
+    match statement {
+        Statement::ExpressionStatement(expression_stmt) => {
+            convert_expression(&expression_stmt.expression)
+        }
+        _ => None,
+    }
+}
+
+fn convert_expression(expression: &Expression) -> Option<SmelterExpression> {
+    match expression {
+        Expression::CallExpression(call_expr) => match &call_expr.callee {
+            Expression::Identifier(identifier) => {
+                if identifier.name.as_str().to_string() == "execute" {
+                    match &call_expr.arguments[0] {
+                        Argument::StringLiteral(string_literal) => {
+                            let tail = string_literal.value.as_str().to_string();
+                            Some(SmelterExpression::ExecuteCommand { tail })
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn main() -> Result<()> {
@@ -47,7 +125,8 @@ fn main() -> Result<()> {
         println!("Semantic errors:\n{error_messages}");
     }
 
-    println!("{:#?}", program);
+    let smelter_program = convert_program(&program);
+    println!("{:?}", smelter_program);
 
     Ok(())
 }
