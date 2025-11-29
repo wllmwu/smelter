@@ -88,6 +88,39 @@ fn convert_expression(expression: &Expression) -> Option<SmelterExpression> {
     }
 }
 
+#[derive(Debug)]
+enum DataPackFile {
+    Mcfunction { contents: String },
+}
+
+#[derive(Debug)]
+struct DataPack {
+    files: Vec<DataPackFile>,
+}
+
+fn convert_mcfunction(function: &SmelterFunction) -> DataPackFile {
+    DataPackFile::Mcfunction {
+        contents: function
+            .body
+            .iter()
+            .map(|expression| match expression {
+                SmelterExpression::ExecuteCommand { tail } => format!("execute {tail}"),
+            })
+            .collect::<Vec<String>>()
+            .join("\n"),
+    }
+}
+
+fn convert_data_pack(program: &SmelterProgram) -> DataPack {
+    DataPack {
+        files: program
+            .body
+            .iter()
+            .map(|function| convert_mcfunction(function))
+            .collect::<Vec<DataPackFile>>(),
+    }
+}
+
 fn main() -> Result<()> {
     let args = CliArguments::parse();
     let path = args.path;
@@ -126,7 +159,9 @@ fn main() -> Result<()> {
     }
 
     let smelter_program = convert_program(&program);
-    println!("{:?}", smelter_program);
+
+    let data_pack = convert_data_pack(&smelter_program);
+    println!("{:?}", data_pack);
 
     Ok(())
 }
