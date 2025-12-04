@@ -1,124 +1,20 @@
 use anyhow::{Context, Result};
 use clap::Parser as CliParser;
 use oxc::{
-    allocator::Allocator,
-    ast::ast::{Argument, Expression, Function, Program, Statement},
+    allocator::{Allocator, Box as OxcBox},
+    ast::ast::{
+        ArrowFunctionExpression, BindingIdentifier, BindingPatternKind, FormalParameters, Function,
+        FunctionBody, Program,
+    },
+    ast_visit::Visit,
     parser::Parser,
-    semantic::SemanticBuilder,
-    span::SourceType,
+    semantic::{ScopeFlags, SemanticBuilder},
+    span::{SourceType, Span},
 };
 
 #[derive(CliParser)]
 struct CliArguments {
     path: std::path::PathBuf,
-}
-
-#[derive(Debug)]
-enum SmelterExpression {
-    ExecuteCommand { tail: String },
-}
-
-#[derive(Debug)]
-struct SmelterFunction {
-    body: Vec<SmelterExpression>,
-}
-
-#[derive(Debug)]
-struct SmelterProgram {
-    body: Vec<SmelterFunction>,
-}
-
-fn convert_program(program: &Program) -> SmelterProgram {
-    SmelterProgram {
-        body: program
-            .body
-            .iter()
-            .filter_map(|statement| match statement {
-                Statement::FunctionDeclaration(function_stmt) => {
-                    Some(convert_function(function_stmt))
-                }
-                _ => None,
-            })
-            .collect::<Vec<SmelterFunction>>(),
-    }
-}
-
-fn convert_function(function: &Function) -> SmelterFunction {
-    if let Some(body) = &function.body {
-        SmelterFunction {
-            body: body
-                .statements
-                .iter()
-                .filter_map(|statement| convert_statement(statement))
-                .collect::<Vec<SmelterExpression>>(),
-        }
-    } else {
-        SmelterFunction { body: Vec::new() }
-    }
-}
-
-fn convert_statement(statement: &Statement) -> Option<SmelterExpression> {
-    match statement {
-        Statement::ExpressionStatement(expression_stmt) => {
-            convert_expression(&expression_stmt.expression)
-        }
-        _ => None,
-    }
-}
-
-fn convert_expression(expression: &Expression) -> Option<SmelterExpression> {
-    match expression {
-        Expression::CallExpression(call_expr) => match &call_expr.callee {
-            Expression::Identifier(identifier) => {
-                if identifier.name.as_str().to_string() == "execute" {
-                    match &call_expr.arguments[0] {
-                        Argument::StringLiteral(string_literal) => {
-                            let tail = string_literal.value.as_str().to_string();
-                            Some(SmelterExpression::ExecuteCommand { tail })
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-#[derive(Debug)]
-enum DataPackFile {
-    Mcfunction { contents: String },
-}
-
-#[derive(Debug)]
-struct DataPack {
-    files: Vec<DataPackFile>,
-}
-
-fn convert_mcfunction(function: &SmelterFunction) -> DataPackFile {
-    DataPackFile::Mcfunction {
-        contents: function
-            .body
-            .iter()
-            .map(|expression| match expression {
-                SmelterExpression::ExecuteCommand { tail } => format!("execute {tail}"),
-            })
-            .collect::<Vec<String>>()
-            .join("\n"),
-    }
-}
-
-fn convert_data_pack(program: &SmelterProgram) -> DataPack {
-    DataPack {
-        files: program
-            .body
-            .iter()
-            .map(|function| convert_mcfunction(function))
-            .collect::<Vec<DataPackFile>>(),
-    }
 }
 
 fn main() -> Result<()> {
@@ -158,19 +54,77 @@ fn main() -> Result<()> {
         println!("Semantic errors:\n{error_messages}");
     }
 
-    let smelter_program = convert_program(&program);
-
-    let data_pack = convert_data_pack(&smelter_program);
-
-    for (index, file) in data_pack.files.iter().enumerate() {
-        let path = format!("out{index}.mcfunction");
-        let contents = match file {
-            DataPackFile::Mcfunction { contents } => contents,
-        };
-        std::fs::write(&path, contents)
-            .with_context(|| format!("Couldn't write file `{}`", &path))?;
+    let data_pack = compile_program(program);
+    for function in data_pack {
+        std::fs::write(&function.name, function.body.join("\n"))
+            .with_context(|| format!("Couldn't write file `{}`", &function.name))?
     }
-    println!("Done");
 
     Ok(())
+}
+
+struct Mcfunction {
+    name: String,
+    body: Vec<String>,
+}
+
+type DataPack = Vec<Mcfunction>;
+
+struct FunctionCompiler {
+    functions: Vec<Mcfunction>,
+}
+
+impl Visit<'_> for FunctionCompiler {
+    fn visit_function(&mut self, it: &Function<'_>, flags: ScopeFlags) {
+        if let Some(body) = &it.body {
+            self.functions
+                .extend(compile_function(&it.id, &it.params, body, &it.span));
+        }
+    }
+
+    fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'_>) {
+        self.functions
+            .extend(compile_function(&None, &it.params, &it.body, &it.span))
+    }
+}
+
+fn compile_program(program: Program) -> DataPack {
+    let mut function_compiler = FunctionCompiler {
+        functions: Vec::new(),
+    };
+    oxc::ast_visit::walk::walk_program(&mut function_compiler, &program);
+    function_compiler.functions
+}
+
+fn compile_function(
+    id: &Option<BindingIdentifier>,
+    parameters: &OxcBox<FormalParameters>,
+    body: &OxcBox<FunctionBody>,
+    span: &Span,
+) -> Vec<Mcfunction> {
+    let function_name = if let Some(identifier) = id {
+        format!("{}_{}.mcfunction", identifier.name.as_str(), span.start)
+    } else {
+        format!("anon_func_{}.mcfunction", span.start)
+    };
+    let mut compiled_body: Vec<String> = Vec::new();
+    let mut subfunctions: Vec<Mcfunction> = Vec::new();
+
+    for (i, parameter) in parameters.items.iter().enumerate() {
+        let pattern = &parameter.pattern;
+        match &pattern.kind {
+            BindingPatternKind::BindingIdentifier(bi) => compiled_body.extend(vec![
+                format!("data modify storage smelter current_context.bindings.{} set from storage smelter current_context.arguments[{}]", bi.name.as_str(), i)
+            ]),
+            _ => ()
+        }
+    }
+
+    subfunctions
+        .into_iter()
+        .chain(std::iter::once(Mcfunction {
+            name: function_name,
+            body: compiled_body,
+        }))
+        .collect()
 }
