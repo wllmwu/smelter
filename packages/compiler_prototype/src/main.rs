@@ -3,8 +3,8 @@ use clap::Parser as CliParser;
 use oxc::{
     allocator::{Allocator, Box as OxcBox},
     ast::ast::{
-        ArrowFunctionExpression, BindingIdentifier, BindingPatternKind, FormalParameters, Function,
-        FunctionBody, Program,
+        ArrowFunctionExpression, BindingIdentifier, BindingPattern, BindingPatternKind,
+        BindingRestElement, FormalParameters, Function, FunctionBody, Program,
     },
     ast_visit::Visit,
     parser::Parser,
@@ -93,7 +93,11 @@ fn compile_program(program: Program) -> DataPack {
         functions: Vec::new(),
     };
     oxc::ast_visit::walk::walk_program(&mut function_compiler, &program);
-    function_compiler.functions
+    function_compiler
+        .functions
+        .into_iter()
+        .chain(std::iter::once(compile_init_function()))
+        .collect()
 }
 
 fn compile_function(
@@ -110,14 +114,11 @@ fn compile_function(
     let mut compiled_body: Vec<String> = Vec::new();
     let mut subfunctions: Vec<Mcfunction> = Vec::new();
 
-    for (i, parameter) in parameters.items.iter().enumerate() {
-        let pattern = &parameter.pattern;
-        match &pattern.kind {
-            BindingPatternKind::BindingIdentifier(bi) => compiled_body.extend(vec![
-                format!("data modify storage smelter current_context.bindings.{} set from storage smelter current_context.arguments[{}]", bi.name.as_str(), i)
-            ]),
-            _ => ()
-        }
+    for parameter in parameters.items.iter() {
+        compiled_body.extend(compile_bind_argument(&parameter.pattern));
+    }
+    if let Some(rest_parameter) = &parameters.rest {
+        compiled_body.extend(compile_bind_rest_argument(&rest_parameter));
     }
 
     subfunctions
@@ -127,4 +128,45 @@ fn compile_function(
             body: compiled_body,
         }))
         .collect()
+}
+
+fn compile_init_function() -> Mcfunction {
+    Mcfunction {
+        name: String::from("smelter_init.mcfunction"),
+        body: vec![
+            String::from("data modify storage smelter environment_stack set value []"),
+            String::from("data modify storage smelter current_arguments set value []"),
+            String::from(
+                "data modify storage smelter current_environment set value {parent: '', bindings: {}}",
+            ),
+            String::from("data modify storage smelter current_return_value set value {}"),
+        ],
+    }
+}
+
+fn compile_bind_argument(pattern: &BindingPattern) -> Vec<String> {
+    match &pattern.kind {
+        BindingPatternKind::BindingIdentifier(bi) => vec![
+            format!(
+                "execute unless data storage smelter current_arguments[0] run data modify storage smelter current_environment.bindings.{} set value {{type: 'undefined'}}",
+                bi.name.as_str(),
+            ),
+            format!(
+                "execute if data storage smelter current_arguments[0] run data modify storage smelter current_environment.bindings.{} set from storage smelter current_arguments[0]",
+                bi.name.as_str(),
+            ),
+            String::from("data remove storage smelter current_arguments[0]"),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+fn compile_bind_rest_argument(pattern: &BindingRestElement) -> Vec<String> {
+    let name = pattern
+        .argument
+        .get_identifier_name()
+        .map_or(String::from(""), |atom| atom.into_string());
+    vec![format!(
+        "data modify storage smelter current_environment.bindings.{name} set from storage smelter current_arguments",
+    )]
 }
