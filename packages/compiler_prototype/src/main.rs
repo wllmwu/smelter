@@ -4,12 +4,13 @@ use oxc::{
     allocator::{Allocator, Box as OxcBox},
     ast::ast::{
         ArrowFunctionExpression, BindingIdentifier, BindingPattern, BindingPatternKind,
-        BindingRestElement, FormalParameters, Function, FunctionBody, Program,
+        BindingRestElement, CallExpression, Expression, FormalParameters, Function, FunctionBody,
+        Program, Statement,
     },
     ast_visit::Visit,
     parser::Parser,
     semantic::{ScopeFlags, SemanticBuilder},
-    span::{SourceType, Span},
+    span::{GetSpan, SourceType, Span},
 };
 
 #[derive(CliParser)]
@@ -89,6 +90,11 @@ impl Visit<'_> for FunctionCompiler {
 }
 
 fn compile_program(program: Program) -> DataPack {
+    let core_functions: Vec<Mcfunction> = vec![
+        compile_init_function(),
+        compile_identifier_resolution(),
+        compile_function_invocation(),
+    ];
     let mut function_compiler = FunctionCompiler {
         functions: Vec::new(),
     };
@@ -96,7 +102,7 @@ fn compile_program(program: Program) -> DataPack {
     function_compiler
         .functions
         .into_iter()
-        .chain(std::iter::once(compile_init_function()))
+        .chain(core_functions.into_iter())
         .collect()
 }
 
@@ -114,11 +120,19 @@ fn compile_function(
     let mut compiled_body: Vec<String> = Vec::new();
     let mut subfunctions: Vec<Mcfunction> = Vec::new();
 
+    // Copy arguments into bindings
     for parameter in parameters.items.iter() {
         compiled_body.extend(compile_bind_argument(&parameter.pattern));
     }
     if let Some(rest_parameter) = &parameters.rest {
         compiled_body.extend(compile_bind_rest_argument(&rest_parameter));
+    }
+
+    // Evaluate body statements
+    for statement in &body.statements {
+        let result = compile_statement(statement);
+        compiled_body.extend(result.0);
+        subfunctions.extend(result.1);
     }
 
     subfunctions
@@ -132,14 +146,16 @@ fn compile_function(
 
 fn compile_init_function() -> Mcfunction {
     Mcfunction {
-        name: String::from("smelter_init.mcfunction"),
+        name: String::from("initialize.mcfunction"),
         body: vec![
             String::from("data modify storage smelter environment_stack set value []"),
             String::from("data modify storage smelter current_arguments set value []"),
             String::from(
-                "data modify storage smelter current_environment set value {parent: '', bindings: {}}",
+                "data modify storage smelter current_environment set value {parent: -1, bindings: {}, evaluations: {}}",
             ),
             String::from("data modify storage smelter current_return_value set value {}"),
+            String::from("data modify storage smelter internal set value {}"),
+            String::from("scoreboard objectives add smelter_internal dummy"),
         ],
     }
 }
@@ -169,4 +185,121 @@ fn compile_bind_rest_argument(pattern: &BindingRestElement) -> Vec<String> {
     vec![format!(
         "data modify storage smelter current_environment.bindings.{name} set from storage smelter current_arguments",
     )]
+}
+
+fn compile_statement(statement: &Statement) -> (Vec<String>, Vec<Mcfunction>) {
+    match statement {
+        Statement::ExpressionStatement(expr_stmt) => compile_expression(&expr_stmt.expression),
+        _ => (Vec::new(), Vec::new()),
+    }
+}
+
+fn make_expression_id(expression: &Expression) -> String {
+    format!("expr_{}", expression.span().start)
+}
+
+fn compile_expression(expression: &Expression) -> (Vec<String>, Vec<Mcfunction>) {
+    let expression_id = make_expression_id(expression);
+    match expression {
+        Expression::Identifier(ident_ref) => {
+            let identifier = ident_ref.name.to_string();
+            (
+                vec![
+                    // If binding exists in current environment, then copy value to evaluation
+                    format!(
+                        "execute if data storage smelter current_environment.bindings.{identifier} run data modify storage smelter current_environment.evaluations.{expression_id} set from storage smelter current_environment.bindings.{identifier}"
+                    ),
+                    // Else, run `resolve`
+                    format!(
+                        "execute unless data storage smelter current_environment.evaluations.{identifier} run data modify storage smelter internal.resolve_args set value {{identifier: '{identifier}', expression_id: '{expression_id}'}}"
+                    ),
+                    format!(
+                        "execute unless data storage smelter current_environment.evaluations.{identifier} run data modify storage smelter internal.resolve_args.stack_index set from storage smelter current_environment.parent"
+                    ),
+                    format!(
+                        "execute unless data storage smelter current_environment.evaluations.{identifier} run function smelter:resolve with storage smelter internal.resolve_args"
+                    ),
+                ],
+                vec![],
+            )
+        }
+        Expression::CallExpression(call_expr) => compile_call_expression(&call_expr),
+        _ => (Vec::new(), Vec::new()),
+    }
+}
+
+fn compile_identifier_resolution() -> Mcfunction {
+    Mcfunction {
+        name: String::from("resolve.mcfunction"),
+        body: vec![
+            // If binding exists at this index in environment stack, then copy value to target location and return
+            String::from(
+                "$execute if data storage smelter environment_stack[$(stack_index)].bindings.$(identifier) run data modify storage smelter current_environment.evaluations.$(expression_id) set from storage smelter environment_stack[$(stack_index)].bindings.$(identifier)",
+            ),
+            String::from(
+                "$execute if data storage smelter environment_stack[$(stack_index)].bindings.$(identifier) run return 1",
+            ),
+            // Else if no parent, return fail
+            String::from(
+                "$execute store result score #resolve__parent_index smelter_internal run data get storage smelter environment_stack[$(stack_index)].parent",
+            ),
+            String::from(
+                "execute if score #resolve__parent_index smelter_internal matches ..-1 run return fail",
+            ),
+            // Else, recurse on parent
+            String::from(
+                "execute store result storage smelter internal.resolve_args.stack_index int 1 run scoreboard players get #resolve__parent_index smelter_internal",
+            ),
+            String::from(
+                "return run function smelter_resolve with storage smelter internal.resolve_args",
+            ),
+        ],
+    }
+}
+
+fn compile_call_expression(expression: &CallExpression) -> (Vec<String>, Vec<Mcfunction>) {
+    let callee_expr_id = make_expression_id(&expression.callee);
+    // Evaluate callee first
+    let mut compiled = vec![compile_expression(&expression.callee)];
+    // Evaluate each argument
+    compiled.extend(expression.arguments.iter().filter_map(|argument| {
+        argument
+            .as_expression()
+            .map(|arg_expr| compile_expression(arg_expr))
+    }));
+    compiled.extend(expression.arguments.iter().map(|argument| (
+        vec![
+            // Copy arguments into register
+            format!("data modify storage smelter current_arguments append from storage smelter current_environment.evaluations.expr_{}", argument.span().start),
+            // Push current environment onto stack
+            String::from("data modify storage smelter environment_stack append from storage smelter current_environment"),
+            // Invoke callee function
+            format!("function smelter:invoke with storage smelter current_environment.evaluations.{callee_expr_id}"),
+        ],
+        Vec::new(),
+    )));
+    reduce_compiled(compiled)
+}
+
+fn compile_function_invocation() -> Mcfunction {
+    Mcfunction {
+        name: String::from("invoke"),
+        body: vec![
+            String::from(
+                "data modify storage smelter current_environment set value $(environment)",
+            ),
+            String::from("function smelter:$(name)"),
+        ],
+    }
+}
+
+fn reduce_compiled(v: Vec<(Vec<String>, Vec<Mcfunction>)>) -> (Vec<String>, Vec<Mcfunction>) {
+    v.into_iter().fold(
+        (Vec::new(), Vec::new()),
+        |(mut commands_acc, mut subfunctions_acc), (commands, subfunctions)| {
+            commands_acc.extend(commands);
+            subfunctions_acc.extend(subfunctions);
+            (commands_acc, subfunctions_acc)
+        },
+    )
 }
