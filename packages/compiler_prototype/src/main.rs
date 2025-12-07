@@ -79,7 +79,7 @@ struct FunctionCompiler {
 }
 
 impl Visit<'_> for FunctionCompiler {
-    fn visit_function(&mut self, it: &Function<'_>, flags: ScopeFlags) {
+    fn visit_function(&mut self, it: &Function<'_>, _: ScopeFlags) {
         if let Some(body) = &it.body {
             self.functions
                 .extend(compile_function(&it.id, &it.params, body, &it.span));
@@ -102,10 +102,22 @@ fn compile_program(program: Program) -> DataPack {
         functions: Vec::new(),
     };
     oxc::ast_visit::walk::walk_program(&mut function_compiler, &program);
+    let (main_function_body, subfunctions) = reduce_compiled(
+        program
+            .body
+            .iter()
+            .map(|statement| compile_statement(statement))
+            .collect::<Vec<(Vec<String>, Vec<Mcfunction>)>>(),
+    );
     function_compiler
         .functions
         .into_iter()
         .chain(core_functions.into_iter())
+        .chain(subfunctions.into_iter())
+        .chain(std::iter::once(Mcfunction {
+            name: String::from("main"),
+            body: main_function_body,
+        }))
         .collect()
 }
 
