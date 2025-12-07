@@ -172,15 +172,17 @@ fn compile_function(
 fn compile_command_wrapper_function_body(command: &str) -> Vec<String> {
     vec![
         String::from(
-            "execute unless data storage smelter current_arguments[0].string run data modify storage smelter current_return_value set value {throw: 'TypeError'}",
+            "execute unless data storage smelter:smelter current_arguments[0].string run data modify storage smelter:smelter current_return_value set value {throw: 'TypeError'}",
         ),
         String::from(
-            "execute unless data storage smelter current_arguments[0].string run return fail",
+            "execute unless data storage smelter:smelter current_arguments[0].string run return fail",
         ),
         String::from(
-            "data modify storage smelter internal.command_args.tail set from storage smelter current_arguments[0].string",
+            "data modify storage smelter:smelter internal.command_args.tail set from storage smelter:smelter current_arguments[0].string",
         ),
-        format!("return run function {command}_macro with storage smelter internal.command_args"),
+        format!(
+            "return run function {command}_macro with storage smelter:smelter internal.command_args"
+        ),
     ]
 }
 
@@ -195,13 +197,13 @@ fn compile_init_function() -> Mcfunction {
     Mcfunction {
         name: String::from("initialize"),
         body: vec![
-            String::from("data modify storage smelter environment_stack set value []"),
-            String::from("data modify storage smelter current_arguments set value []"),
+            String::from("data modify storage smelter:smelter environment_stack set value []"),
+            String::from("data modify storage smelter:smelter current_arguments set value []"),
             String::from(
-                "data modify storage smelter current_environment set value {parent: -1, bindings: {}, evaluations: {}}",
+                "data modify storage smelter:smelter current_environment set value {parent: -1, bindings: {}, evaluations: {}}",
             ),
-            String::from("data modify storage smelter current_return_value set value {}"),
-            String::from("data modify storage smelter internal set value {}"),
+            String::from("data modify storage smelter:smelter current_return_value set value {}"),
+            String::from("data modify storage smelter:smelter internal set value {}"),
             String::from("scoreboard objectives add smelter_internal dummy"),
         ],
     }
@@ -211,14 +213,14 @@ fn compile_bind_argument(pattern: &BindingPattern) -> Vec<String> {
     match &pattern.kind {
         BindingPatternKind::BindingIdentifier(bi) => vec![
             format!(
-                "execute unless data storage smelter current_arguments[0] run data modify storage smelter current_environment.bindings.{} set value {{undefined: true}}",
+                "execute unless data storage smelter:smelter current_arguments[0] run data modify storage smelter:smelter current_environment.bindings.{} set value {{undefined: true}}",
                 bi.name.as_str(),
             ),
             format!(
-                "execute if data storage smelter current_arguments[0] run data modify storage smelter current_environment.bindings.{} set from storage smelter current_arguments[0]",
+                "execute if data storage smelter:smelter current_arguments[0] run data modify storage smelter:smelter current_environment.bindings.{} set from storage smelter:smelter current_arguments[0]",
                 bi.name.as_str(),
             ),
-            String::from("data remove storage smelter current_arguments[0]"),
+            String::from("data remove storage smelter:smelter current_arguments[0]"),
         ],
         _ => Vec::new(),
     }
@@ -230,7 +232,7 @@ fn compile_bind_rest_argument(pattern: &BindingRestElement) -> Vec<String> {
         .get_identifier_name()
         .map_or(String::from(""), |atom| atom.into_string());
     vec![format!(
-        "data modify storage smelter current_environment.bindings.{name} set from storage smelter current_arguments",
+        "data modify storage smelter:smelter current_environment.bindings.{name} set from storage smelter:smelter current_arguments",
     )]
 }
 
@@ -244,10 +246,10 @@ fn compile_statement(statement: &Statement) -> (Vec<String>, Vec<Mcfunction>) {
                 (
                     vec![
                         format!(
-                            "data modify storage smelter current_environment.bindings.{function_identifier} set value {{function: {{name: '{function_name}'}}"
+                            "data modify storage smelter:smelter current_environment.bindings.{function_identifier} set value {{function: {{name: '{function_name}'}}"
                         ),
                         format!(
-                            "execute store result storage smelter current_environment.bindings.{function_identifier}.function.environment_index int 1 run data get storage smelter environment_stack"
+                            "execute store result storage smelter:smelter current_environment.bindings.{function_identifier}.function.environment_index int 1 run data get storage smelter:smelter environment_stack"
                         ),
                     ],
                     Vec::new(),
@@ -273,17 +275,17 @@ fn compile_expression(expression: &Expression) -> (Vec<String>, Vec<Mcfunction>)
                 vec![
                     // If binding exists in current environment, then copy value to evaluation
                     format!(
-                        "execute if data storage smelter current_environment.bindings.{identifier} run data modify storage smelter current_environment.evaluations.{expression_id} set from storage smelter current_environment.bindings.{identifier}"
+                        "execute if data storage smelter:smelter current_environment.bindings.{identifier} run data modify storage smelter:smelter current_environment.evaluations.{expression_id} set from storage smelter:smelter current_environment.bindings.{identifier}"
                     ),
                     // Else, run `resolve`
                     format!(
-                        "execute unless data storage smelter current_environment.evaluations.{expression_id} run data modify storage smelter internal.resolve_args set value {{identifier: '{identifier}', expression_id: '{expression_id}'}}"
+                        "execute unless data storage smelter:smelter current_environment.evaluations.{expression_id} run data modify storage smelter:smelter internal.resolve_args set value {{identifier: '{identifier}', expression_id: '{expression_id}'}}"
                     ),
                     format!(
-                        "execute unless data storage smelter current_environment.evaluations.{expression_id} run data modify storage smelter internal.resolve_args.stack_index set from storage smelter current_environment.parent"
+                        "execute unless data storage smelter:smelter current_environment.evaluations.{expression_id} run data modify storage smelter:smelter internal.resolve_args.stack_index set from storage smelter:smelter current_environment.parent"
                     ),
                     format!(
-                        "execute unless data storage smelter current_environment.evaluations.{expression_id} run function smelter:resolve with storage smelter internal.resolve_args"
+                        "execute unless data storage smelter:smelter current_environment.evaluations.{expression_id} run function smelter:resolve with storage smelter:smelter internal.resolve_args"
                     ),
                 ],
                 vec![],
@@ -293,7 +295,7 @@ fn compile_expression(expression: &Expression) -> (Vec<String>, Vec<Mcfunction>)
             let string_value = literal.value.as_str();
             (
                 vec![format!(
-                    "data modify storage smelter current_environment.evaluations.{expression_id} set value {{string: '{string_value}'}}"
+                    "data modify storage smelter:smelter current_environment.evaluations.{expression_id} set value {{string: '{string_value}'}}"
                 )],
                 Vec::new(),
             )
@@ -309,24 +311,24 @@ fn compile_identifier_resolution() -> Mcfunction {
         body: vec![
             // If binding exists at this index in environment stack, then copy value to target location and return
             String::from(
-                "$execute if data storage smelter environment_stack[$(stack_index)].bindings.$(identifier) run data modify storage smelter current_environment.evaluations.$(expression_id) set from storage smelter environment_stack[$(stack_index)].bindings.$(identifier)",
+                "$execute if data storage smelter:smelter environment_stack[$(stack_index)].bindings.$(identifier) run data modify storage smelter:smelter current_environment.evaluations.$(expression_id) set from storage smelter:smelter environment_stack[$(stack_index)].bindings.$(identifier)",
             ),
             String::from(
-                "$execute if data storage smelter environment_stack[$(stack_index)].bindings.$(identifier) run return 1",
+                "$execute if data storage smelter:smelter environment_stack[$(stack_index)].bindings.$(identifier) run return 1",
             ),
             // Else if no parent, return fail
             String::from(
-                "$execute store result score #resolve__parent_index smelter_internal run data get storage smelter environment_stack[$(stack_index)].parent",
+                "$execute store result score #resolve__parent_index smelter_internal run data get storage smelter:smelter environment_stack[$(stack_index)].parent",
             ),
             String::from(
                 "execute if score #resolve__parent_index smelter_internal matches ..-1 run return fail",
             ),
             // Else, recurse on parent
             String::from(
-                "execute store result storage smelter internal.resolve_args.stack_index int 1 run scoreboard players get #resolve__parent_index smelter_internal",
+                "execute store result storage smelter:smelter internal.resolve_args.stack_index int 1 run scoreboard players get #resolve__parent_index smelter_internal",
             ),
             String::from(
-                "return run function smelter_resolve with storage smelter internal.resolve_args",
+                "return run function smelter_resolve with storage smelter:smelter internal.resolve_args",
             ),
         ],
     }
@@ -345,11 +347,11 @@ fn compile_call_expression(expression: &CallExpression) -> (Vec<String>, Vec<Mcf
     compiled.extend(expression.arguments.iter().map(|argument| (
         vec![
             // Copy arguments into register
-            format!("data modify storage smelter current_arguments append from storage smelter current_environment.evaluations.expr_{}", argument.span().start),
+            format!("data modify storage smelter:smelter current_arguments append from storage smelter:smelter current_environment.evaluations.expr_{}", argument.span().start),
             // Push current environment onto stack
-            String::from("data modify storage smelter environment_stack append from storage smelter current_environment"),
+            String::from("data modify storage smelter:smelter environment_stack append from storage smelter:smelter current_environment"),
             // Invoke callee function
-            format!("function smelter:invoke with storage smelter current_environment.evaluations.{callee_expr_id}.function"),
+            format!("function smelter:invoke with storage smelter:smelter current_environment.evaluations.{callee_expr_id}.function"),
         ],
         Vec::new(),
     )));
@@ -361,7 +363,7 @@ fn compile_function_invocation() -> Mcfunction {
         name: String::from("invoke"),
         body: vec![
             String::from(
-                "data modify storage smelter current_environment set from storage smelter environment_stack[$(environment_index)]",
+                "data modify storage smelter:smelter current_environment set from storage smelter:smelter environment_stack[$(environment_index)]",
             ),
             String::from("function smelter:$(name)"),
         ],
