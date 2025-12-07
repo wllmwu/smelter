@@ -117,6 +117,24 @@ fn compile_function(
     } else {
         format!("anon_func_{}.mcfunction", span.start)
     };
+
+    let command_directive = body
+        .directives
+        .iter()
+        .find(|directive| directive.directive.starts_with("smelter"));
+    if let Some(directive) = command_directive {
+        let tokens = directive.directive.split(' ').collect::<Vec<&str>>();
+        if let Some(command) = tokens.get(1) {
+            return vec![
+                Mcfunction {
+                    name: function_name,
+                    body: compile_command_wrapper_function_body(command),
+                },
+                compile_command_macro_function(command),
+            ];
+        }
+    }
+
     let mut compiled_body: Vec<String> = Vec::new();
     let mut subfunctions: Vec<Mcfunction> = Vec::new();
 
@@ -144,6 +162,30 @@ fn compile_function(
         .collect()
 }
 
+fn compile_command_wrapper_function_body(command: &str) -> Vec<String> {
+    vec![
+        String::from(
+            "execute unless data storage smelter current_arguments[0].string run data modify storage smelter current_return_value set value {throw: 'TypeError'}",
+        ),
+        String::from(
+            "execute unless data storage smelter current_arguments[0].string run return fail",
+        ),
+        String::from(
+            "data modify storage smelter internal.command_args.tail set from storage smelter current_arguments[0].string",
+        ),
+        format!(
+            "return run function {command}_macro.mcfunction with storage smelter internal.command_args"
+        ),
+    ]
+}
+
+fn compile_command_macro_function(command: &str) -> Mcfunction {
+    Mcfunction {
+        name: format!("{command}_macro.mcfunction"),
+        body: vec![format!("${command} $(tail)")],
+    }
+}
+
 fn compile_init_function() -> Mcfunction {
     Mcfunction {
         name: String::from("initialize.mcfunction"),
@@ -164,7 +206,7 @@ fn compile_bind_argument(pattern: &BindingPattern) -> Vec<String> {
     match &pattern.kind {
         BindingPatternKind::BindingIdentifier(bi) => vec![
             format!(
-                "execute unless data storage smelter current_arguments[0] run data modify storage smelter current_environment.bindings.{} set value {{type: 'undefined'}}",
+                "execute unless data storage smelter current_arguments[0] run data modify storage smelter current_environment.bindings.{} set value {{undefined: true}}",
                 bi.name.as_str(),
             ),
             format!(
