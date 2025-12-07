@@ -57,8 +57,11 @@ fn main() -> Result<()> {
 
     let data_pack = compile_program(program);
     for function in data_pack {
-        std::fs::write(&function.name, function.body.join("\n"))
-            .with_context(|| format!("Couldn't write file `{}`", &function.name))?
+        std::fs::write(
+            format!("{}.mcfunction", &function.name),
+            function.body.join("\n"),
+        )
+        .with_context(|| format!("Couldn't write file `{}.mcfunction`", &function.name))?
     }
 
     Ok(())
@@ -106,17 +109,21 @@ fn compile_program(program: Program) -> DataPack {
         .collect()
 }
 
+fn make_function_name(id: &Option<BindingIdentifier>, span: &Span) -> String {
+    if let Some(identifier) = id {
+        format!("{}_{}", identifier.name.as_str(), span.start)
+    } else {
+        format!("anon_func_{}", span.start)
+    }
+}
+
 fn compile_function(
     id: &Option<BindingIdentifier>,
     parameters: &OxcBox<FormalParameters>,
     body: &OxcBox<FunctionBody>,
     span: &Span,
 ) -> Vec<Mcfunction> {
-    let function_name = if let Some(identifier) = id {
-        format!("{}_{}.mcfunction", identifier.name.as_str(), span.start)
-    } else {
-        format!("anon_func_{}.mcfunction", span.start)
-    };
+    let function_name = make_function_name(id, span);
 
     let command_directive = body
         .directives
@@ -173,22 +180,20 @@ fn compile_command_wrapper_function_body(command: &str) -> Vec<String> {
         String::from(
             "data modify storage smelter internal.command_args.tail set from storage smelter current_arguments[0].string",
         ),
-        format!(
-            "return run function {command}_macro.mcfunction with storage smelter internal.command_args"
-        ),
+        format!("return run function {command}_macro with storage smelter internal.command_args"),
     ]
 }
 
 fn compile_command_macro_function(command: &str) -> Mcfunction {
     Mcfunction {
-        name: format!("{command}_macro.mcfunction"),
+        name: format!("{command}_macro"),
         body: vec![format!("${command} $(tail)")],
     }
 }
 
 fn compile_init_function() -> Mcfunction {
     Mcfunction {
-        name: String::from("initialize.mcfunction"),
+        name: String::from("initialize"),
         body: vec![
             String::from("data modify storage smelter environment_stack set value []"),
             String::from("data modify storage smelter current_arguments set value []"),
@@ -232,6 +237,25 @@ fn compile_bind_rest_argument(pattern: &BindingRestElement) -> Vec<String> {
 fn compile_statement(statement: &Statement) -> (Vec<String>, Vec<Mcfunction>) {
     match statement {
         Statement::ExpressionStatement(expr_stmt) => compile_expression(&expr_stmt.expression),
+        Statement::FunctionDeclaration(function) => {
+            if let Some(_) = &function.body {
+                let function_name = make_function_name(&function.id, &function.span);
+                let function_identifier = function.id.as_ref().unwrap().name.to_string();
+                (
+                    vec![
+                        format!(
+                            "data modify storage smelter current_environment.bindings.{function_identifier} set value {{function: {{name: '{function_name}'}}"
+                        ),
+                        format!(
+                            "execute store result storage smelter current_environment.bindings.{function_identifier}.function.environment_index int 1 run data get storage smelter environment_stack"
+                        ),
+                    ],
+                    Vec::new(),
+                )
+            } else {
+                (Vec::new(), Vec::new())
+            }
+        }
         _ => (Vec::new(), Vec::new()),
     }
 }
@@ -281,7 +305,7 @@ fn compile_expression(expression: &Expression) -> (Vec<String>, Vec<Mcfunction>)
 
 fn compile_identifier_resolution() -> Mcfunction {
     Mcfunction {
-        name: String::from("resolve.mcfunction"),
+        name: String::from("resolve"),
         body: vec![
             // If binding exists at this index in environment stack, then copy value to target location and return
             String::from(
@@ -325,7 +349,7 @@ fn compile_call_expression(expression: &CallExpression) -> (Vec<String>, Vec<Mcf
             // Push current environment onto stack
             String::from("data modify storage smelter environment_stack append from storage smelter current_environment"),
             // Invoke callee function
-            format!("function smelter:invoke with storage smelter current_environment.evaluations.{callee_expr_id}"),
+            format!("function smelter:invoke with storage smelter current_environment.evaluations.{callee_expr_id}.function"),
         ],
         Vec::new(),
     )));
@@ -337,7 +361,7 @@ fn compile_function_invocation() -> Mcfunction {
         name: String::from("invoke"),
         body: vec![
             String::from(
-                "data modify storage smelter current_environment set value $(environment)",
+                "data modify storage smelter current_environment set from storage smelter environment_stack[$(environment_index)]",
             ),
             String::from("function smelter:$(name)"),
         ],
