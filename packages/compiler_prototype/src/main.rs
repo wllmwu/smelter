@@ -258,7 +258,7 @@ fn compile_statement(statement: &Statement) -> (Vec<String>, Vec<Mcfunction>) {
                 (
                     vec![
                         format!(
-                            "data modify storage smelter:smelter current_environment.bindings.{function_identifier} set value {{function: {{name: '{function_name}'}}"
+                            "data modify storage smelter:smelter current_environment.bindings.{function_identifier} set value {{function: {{name: '{function_name}'}}}}"
                         ),
                         format!(
                             "execute store result storage smelter:smelter current_environment.bindings.{function_identifier}.function.environment_index int 1 run data get storage smelter:smelter environment_stack"
