@@ -253,16 +253,25 @@ fn compile_expression(expression: &Expression) -> (Vec<String>, Vec<Mcfunction>)
                     ),
                     // Else, run `resolve`
                     format!(
-                        "execute unless data storage smelter current_environment.evaluations.{identifier} run data modify storage smelter internal.resolve_args set value {{identifier: '{identifier}', expression_id: '{expression_id}'}}"
+                        "execute unless data storage smelter current_environment.evaluations.{expression_id} run data modify storage smelter internal.resolve_args set value {{identifier: '{identifier}', expression_id: '{expression_id}'}}"
                     ),
                     format!(
-                        "execute unless data storage smelter current_environment.evaluations.{identifier} run data modify storage smelter internal.resolve_args.stack_index set from storage smelter current_environment.parent"
+                        "execute unless data storage smelter current_environment.evaluations.{expression_id} run data modify storage smelter internal.resolve_args.stack_index set from storage smelter current_environment.parent"
                     ),
                     format!(
-                        "execute unless data storage smelter current_environment.evaluations.{identifier} run function smelter:resolve with storage smelter internal.resolve_args"
+                        "execute unless data storage smelter current_environment.evaluations.{expression_id} run function smelter:resolve with storage smelter internal.resolve_args"
                     ),
                 ],
                 vec![],
+            )
+        }
+        Expression::StringLiteral(literal) => {
+            let string_value = literal.value.as_str();
+            (
+                vec![format!(
+                    "data modify storage smelter current_environment.evaluations.{expression_id} set value {{string: '{string_value}'}}"
+                )],
+                Vec::new(),
             )
         }
         Expression::CallExpression(call_expr) => compile_call_expression(&call_expr),
