@@ -55,6 +55,8 @@ fn main() -> Result<()> {
         println!("Semantic errors:\n{error_messages}");
     }
 
+    // println!("{:#?}", &program);
+
     let data_pack = compile_program(program);
     std::fs::create_dir_all("smelter_prototype/data/smelter/function")
         .with_context(|| "Couldn't create directories")?;
@@ -405,14 +407,16 @@ fn compile_call_expression(expression: &CallExpression) -> (Vec<String>, Vec<Mcf
     compiled.extend(expression.arguments.iter().map(|argument| (
         vec![
             // Copy arguments into register
-            format!("data modify storage smelter:smelter current_arguments append from storage smelter:smelter current_environment.evaluations.expr_{}", argument.span().start),
-            // Push current environment onto stack
-            String::from("data modify storage smelter:smelter environment_stack append from storage smelter:smelter current_environment"),
-            // Invoke callee function
-            format!("function smelter:invoke with storage smelter:smelter current_environment.evaluations.{callee_expr_id}.function"),
+            format!("data modify storage smelter:smelter current_arguments append from storage smelter:smelter current_environment.evaluations.expr_{}", argument.span().start)
         ],
         Vec::new(),
     )));
+    compiled.push((vec![
+        // Push current environment onto stack
+        String::from("data modify storage smelter:smelter environment_stack append from storage smelter:smelter current_environment"),
+        // Invoke callee function
+        format!("function smelter:invoke with storage smelter:smelter current_environment.evaluations.{callee_expr_id}.function"),
+    ], Vec::new()));
     reduce_compiled(compiled)
 }
 
