@@ -302,6 +302,22 @@ fn make_expression_id(expression: &Expression) -> String {
 fn compile_expression(expression: &Expression) -> (Vec<String>, Vec<Mcfunction>) {
     let expression_id = make_expression_id(expression);
     match expression {
+        Expression::ArrowFunctionExpression(arrow_func) => {
+            let function_name = make_function_name(&None, &arrow_func.span);
+            (
+                vec![
+                    // Set function object
+                    format!(
+                        "data modify storage smelter:smelter current_environment.evaluations.{expression_id} set value {{function: {{name: '{function_name}'}}"
+                    ),
+                    // Store pointer to end of environment stack (where current environment will be pushed if this function gets called by the current function)
+                    format!(
+                        "execute store result storage smelter:smelter current_environment.evaluations.{expression_id}.function.environment_index int 1 run data get storage smelter:smelter environment_stack"
+                    ),
+                ],
+                Vec::new(),
+            )
+        }
         Expression::Identifier(ident_ref) => {
             let identifier = ident_ref.name.to_string();
             (
