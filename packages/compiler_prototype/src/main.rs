@@ -132,7 +132,7 @@ fn compile_program(program: Program) -> DataPack {
 
 fn make_function_name(id: &Option<BindingIdentifier>, span: &Span) -> String {
     if let Some(identifier) = id {
-        format!("{}_{}", identifier.name.as_str(), span.start)
+        format!("{}_{}", identifier.name.to_ascii_lowercase(), span.start)
     } else {
         format!("anon_func_{}", span.start)
     }
@@ -291,7 +291,7 @@ fn compile_statement(statement: &Statement) -> (Vec<String>, Vec<Mcfunction>) {
                         let compiled = compile_expression(initializer);
                         commands.extend(compiled.0);
                         subfunctions.extend(compiled.1);
-                        commands.push(format!("data modify storage smelter:smelter current_environment.bindings.{name} set from current_environment.evaluations.{expression_id}"));
+                        commands.push(format!("data modify storage smelter:smelter current_environment.bindings.{name} set from storage smelter:smelter current_environment.evaluations.{expression_id}"));
                     } else {
                         // Initialize to undefined
                         commands.push(format!("data modify storage smelter:smelter current_environment.bindings.{name} set value {{undefined: true}}"));
@@ -317,7 +317,7 @@ fn compile_expression(expression: &Expression) -> (Vec<String>, Vec<Mcfunction>)
                 vec![
                     // Set function object
                     format!(
-                        "data modify storage smelter:smelter current_environment.evaluations.{expression_id} set value {{function: {{name: '{function_name}'}}"
+                        "data modify storage smelter:smelter current_environment.evaluations.{expression_id} set value {{function: {{name: '{function_name}'}}}}"
                     ),
                     // Store pointer to end of environment stack (where current environment will be pushed if this function gets called by the current function)
                     format!(
@@ -421,9 +421,9 @@ fn compile_function_invocation() -> Mcfunction {
         name: String::from("invoke"),
         body: vec![
             String::from(
-                "data modify storage smelter:smelter current_environment set from storage smelter:smelter environment_stack[$(environment_index)]",
+                "$data modify storage smelter:smelter current_environment set from storage smelter:smelter environment_stack[$(environment_index)]",
             ),
-            String::from("function smelter:$(name)"),
+            String::from("$function smelter:$(name)"),
         ],
     }
 }
