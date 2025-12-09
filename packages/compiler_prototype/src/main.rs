@@ -270,6 +270,27 @@ fn compile_statement(statement: &Statement) -> (Vec<String>, Vec<Mcfunction>) {
                 (Vec::new(), Vec::new())
             }
         }
+        Statement::VariableDeclaration(declaration) => {
+            let mut commands: Vec<String> = Vec::new();
+            let mut subfunctions: Vec<Mcfunction> = Vec::new();
+            for declarator in &declaration.declarations {
+                if let Some(identifier) = declarator.id.get_identifier_name() {
+                    let name = identifier.as_str();
+                    if let Some(initializer) = &declarator.init {
+                        // Compile initializer
+                        let expression_id = make_expression_id(initializer);
+                        let compiled = compile_expression(initializer);
+                        commands.extend(compiled.0);
+                        subfunctions.extend(compiled.1);
+                        commands.push(format!("data modify storage smelter:smelter current_environment.bindings.{name} set from current_environment.evaluations.{expression_id}"));
+                    } else {
+                        // Initialize to undefined
+                        commands.push(format!("data modify storage smelter:smelter current_environment.bindings.{name} set value {{undefined: true}}"));
+                    }
+                }
+            }
+            (commands, subfunctions)
+        }
         _ => (Vec::new(), Vec::new()),
     }
 }
