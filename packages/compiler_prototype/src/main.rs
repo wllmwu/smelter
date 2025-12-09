@@ -56,13 +56,22 @@ fn main() -> Result<()> {
     }
 
     let data_pack = compile_program(program);
+    std::fs::create_dir_all("smelter_prototype/data/smelter/function")
+        .with_context(|| "Couldn't create directories")?;
     for function in data_pack {
         std::fs::write(
-            format!("{}.mcfunction", &function.name),
+            format!(
+                "smelter_prototype/data/smelter/function/{}.mcfunction",
+                &function.name
+            ),
             function.body.join("\n"),
         )
         .with_context(|| format!("Couldn't write file `{}.mcfunction`", &function.name))?
     }
+    std::fs::write(
+        "smelter_prototype/pack.mcmeta",
+        "{\"pack\":{\"description\":\"smelter prototype\",\"min_format\":[88,0],\"max_format\":[88,0]}}",
+    ).with_context(|| "Couldn't write file: `pack.mcmeta`")?;
 
     Ok(())
 }
