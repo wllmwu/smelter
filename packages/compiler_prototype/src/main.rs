@@ -104,7 +104,9 @@ impl Visit<'_> for FunctionCompiler {
 }
 
 fn debug_log(message: String) -> String {
-    format!("tellraw @a '[smelter] {message}'")
+    format!(
+        "execute if score #debug smelter_internal matches 1.. run tellraw @a '[smelter] {message}'"
+    )
 }
 
 fn compile_program(program: Program) -> DataPack {
@@ -112,6 +114,7 @@ fn compile_program(program: Program) -> DataPack {
         compile_init_function(),
         compile_identifier_resolution(),
         compile_function_invocation(),
+        compile_stack_pop(),
     ];
     let mut function_compiler = FunctionCompiler {
         functions: Vec::new(),
@@ -214,7 +217,7 @@ fn compile_command_wrapper_function_body(command: &str) -> Vec<String> {
         ),
         debug_log(format!("returning from wrapper function {command}")),
         format!(
-            "return run function {command}_macro with storage smelter:smelter internal.command_args"
+            "return run function smelter:{command}_macro with storage smelter:smelter internal.command_args"
         ),
     ]
 }
@@ -466,6 +469,12 @@ fn compile_call_expression(expression: &CallExpression) -> (Vec<String>, Vec<Mcf
         String::from("data modify storage smelter:smelter environment_stack append from storage smelter:smelter current_environment"),
         // Invoke callee function
         format!("function smelter:invoke with storage smelter:smelter current_environment.evaluations.{callee_expr_id}.function"),
+        // Pop environment
+        String::from("data modify storage smelter:smelter internal.pop_stack_args set value {stack_size: 0}"),
+        String::from("execute store result storage smelter:smelter internal.pop_stack_args.stack_size int 1 run data get storage smelter:smelter environment_stack"),
+        String::from("function smelter:pop_stack with storage smelter:smelter internal.pop_stack_args"),
+        // Clear arguments
+        String::from("data modify storage smelter:smelter current_arguments set value []"),
         debug_log(format!("done invoking function {callee_expr_id}")),
     ], Vec::new()));
     reduce_compiled(compiled)
@@ -486,6 +495,23 @@ fn compile_function_invocation() -> Mcfunction {
             ),
             String::from("$function smelter:$(name)"),
             debug_log(String::from("exiting invoke")),
+        ],
+    }
+}
+
+fn compile_stack_pop() -> Mcfunction {
+    Mcfunction {
+        name: String::from("pop_stack"),
+        body: vec![
+            format!(
+                "${}",
+                debug_log(String::from("entering pop_stack: stack_size=$(stack_size)"))
+            ),
+            String::from(
+                "$data modify storage smelter:smelter current_environment set from storage smelter:smelter environment_stack[$(stack_size)]",
+            ),
+            String::from("$data remove storage smelter:smelter environment_stack[$(stack_size)]"),
+            debug_log(String::from("exiting pop_stack")),
         ],
     }
 }
