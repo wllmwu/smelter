@@ -366,6 +366,17 @@ fn compile_expression(expression: &Expression) -> (Vec<String>, Vec<Mcfunction>)
                 Vec::new(),
             )
         }
+        Expression::BooleanLiteral(literal) => (
+            vec![
+                debug_log(format!("evaluating boolean literal {}", literal.value)),
+                format!(
+                    "data modify storage smelter:smelter current_environment.evaluations.{expression_id} set value {{boolean: {}}}",
+                    literal.value
+                ),
+                debug_log(format!("done evaluating boolean literal {}", literal.value)),
+            ],
+            Vec::new(),
+        ),
         Expression::Identifier(ident_ref) => {
             let identifier = ident_ref.name.to_string();
             (
@@ -390,6 +401,27 @@ fn compile_expression(expression: &Expression) -> (Vec<String>, Vec<Mcfunction>)
                 vec![],
             )
         }
+        Expression::NullLiteral(_) => (
+            vec![
+                debug_log(format!("evaluating null literal")),
+                format!(
+                    "data modify storage smelter:smelter current_environment.evaluations.{expression_id} set value {{null: true}}"
+                ),
+                debug_log(format!("done evaluating null literal")),
+            ],
+            Vec::new(),
+        ),
+        Expression::NumericLiteral(literal) => (
+            vec![
+                debug_log(format!("evaluating numeric literal {}", literal.value)),
+                format!(
+                    "data modify storage smelter:smelter current_environment.evaluations.{expression_id} set value {{number: {}d}}",
+                    literal.value
+                ),
+                debug_log(format!("done evaluating numeric literal {}", literal.value)),
+            ],
+            Vec::new(),
+        ),
         Expression::StringLiteral(literal) => {
             let string_value = literal.value.as_str();
             (
