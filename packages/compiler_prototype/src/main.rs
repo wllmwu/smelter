@@ -366,6 +366,20 @@ fn compile_expression(expression: &Expression) -> (Vec<String>, Vec<Mcfunction>)
                 Vec::new(),
             )
         }
+        Expression::BigIntLiteral(literal) => {
+            let str_value = literal.value.as_str();
+            let value = str_value.parse::<i64>().unwrap_or(0);
+            (
+                vec![
+                    debug_log(format!("evaluating bigint literal {str_value}")),
+                    format!(
+                        "data modify storage smelter:smelter current_environment.evaluations.{expression_id} set value {{bigint: {value}l}}"
+                    ),
+                    debug_log(format!("done evaluating bigint literal {str_value}")),
+                ],
+                Vec::new(),
+            )
+        }
         Expression::BooleanLiteral(literal) => (
             vec![
                 debug_log(format!("evaluating boolean literal {}", literal.value)),
