@@ -1,7 +1,10 @@
 use anyhow::{Context, Result};
 use clap::Parser as CliParser;
 use oxc::{
-    allocator::Allocator, ast::ast::Program, parser::Parser, semantic::SemanticBuilder,
+    allocator::Allocator,
+    ast::ast::{Program, Statement},
+    parser::Parser,
+    semantic::SemanticBuilder,
     span::SourceType,
 };
 
@@ -83,9 +86,9 @@ struct DataPackBuilder {
 }
 
 impl DataPackBuilder {
-    fn new() -> DataPackBuilder {
+    fn new(system_mcfunctions: Vec<Mcfunction>) -> DataPackBuilder {
         DataPackBuilder {
-            committed_mcfunctions: Vec::new(),
+            committed_mcfunctions: system_mcfunctions,
             compiling_stack: Vec::new(),
         }
     }
@@ -124,6 +127,40 @@ impl DataPackBuilder {
     }
 }
 
-fn compile_program(program: Program) -> DataPack {
-    Vec::new()
+fn debug_log(message: String) -> String {
+    format!(
+        "execute if score #debug smelter_internal matches 1.. run tellraw @a '[smelter] {message}'"
+    )
 }
+
+fn debug_log_macro(message: String) -> String {
+    format!("${}", debug_log(message))
+}
+
+fn compile_program(program: Program) -> DataPack {
+    let mut builder = DataPackBuilder::new(vec![Mcfunction {
+        name: String::from("initialize"),
+        body: vec![
+            String::from("data modify storage smelter:smelter heap set value []"),
+            String::from("data modify storage smelter:smelter queue set value []"),
+            String::from("data modify storage smelter:smelter stack set value []"),
+        ],
+    }]);
+
+    builder
+        .push_mcfunction(String::from("main"))
+        .push_command(debug_log(String::from("entering main")))
+        .push_command(String::from("function smelter:initialize"));
+
+    for statement in &program.body {
+        compile_statement(&mut builder, statement);
+    }
+
+    builder
+        .push_command(debug_log(String::from("exiting main")))
+        .commit_mcfunction();
+
+    builder.complete()
+}
+
+fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) {}
