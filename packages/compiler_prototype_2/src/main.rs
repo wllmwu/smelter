@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser as CliParser;
 use oxc::{
     allocator::Allocator,
@@ -52,7 +52,7 @@ fn main() -> Result<()> {
 
     // println!("{:#?}", &program);
 
-    let data_pack = compile_program(program);
+    let data_pack = compile_program(program)?;
     std::fs::create_dir_all("smelter_prototype/data/smelter/function")
         .with_context(|| "Couldn't create directories")?;
     for function in data_pack {
@@ -137,7 +137,7 @@ fn debug_log_macro(message: String) -> String {
     format!("${}", debug_log(message))
 }
 
-fn compile_program(program: Program) -> DataPack {
+fn compile_program(program: Program) -> Result<DataPack> {
     let mut builder = DataPackBuilder::new(vec![Mcfunction {
         name: String::from("initialize"),
         body: vec![
@@ -153,14 +153,56 @@ fn compile_program(program: Program) -> DataPack {
         .push_command(String::from("function smelter:initialize"));
 
     for statement in &program.body {
-        compile_statement(&mut builder, statement);
+        compile_statement(&mut builder, statement).with_context(|| "Couldn't compile program")?;
     }
 
     builder
         .push_command(debug_log(String::from("exiting main")))
         .commit_mcfunction();
 
-    builder.complete()
+    Ok(builder.complete())
 }
 
-fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) {}
+fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Result<()> {
+    match statement {
+        // Basics
+        Statement::BlockStatement(block_statement) => todo!(),
+        Statement::EmptyStatement(_) => (),
+        Statement::ExpressionStatement(expression_statement) => todo!(),
+        // Control flow
+        Statement::BreakStatement(break_statement) => todo!(),
+        Statement::ContinueStatement(continue_statement) => todo!(),
+        Statement::DebuggerStatement(_) => bail!("Not supported: debugger statements"),
+        Statement::DoWhileStatement(do_while_statement) => todo!(),
+        Statement::ForInStatement(for_in_statement) => todo!(),
+        Statement::ForOfStatement(for_of_statement) => todo!(),
+        Statement::ForStatement(for_statement) => todo!(),
+        Statement::IfStatement(if_statement) => todo!(),
+        Statement::LabeledStatement(_) => bail!("Not supported: labeled statements"),
+        Statement::ReturnStatement(return_statement) => todo!(),
+        Statement::SwitchStatement(switch_statement) => todo!(),
+        Statement::ThrowStatement(throw_statement) => todo!(),
+        Statement::TryStatement(try_statement) => todo!(),
+        Statement::WhileStatement(while_statement) => todo!(),
+        Statement::WithStatement(_) => bail!("Not supported: with statements"),
+        // Declarations
+        Statement::ClassDeclaration(class_declaration) => todo!(),
+        Statement::FunctionDeclaration(function_declaration) => todo!(),
+        Statement::VariableDeclaration(variable_declaration) => todo!(),
+        // Imports and exports
+        Statement::ImportDeclaration(_) => bail!("Not supported: imports and exports"),
+        Statement::ExportAllDeclaration(_) => bail!("Not supported: imports and exports"),
+        Statement::ExportDefaultDeclaration(_) => bail!("Not supported: imports and exports"),
+        Statement::ExportNamedDeclaration(_) => bail!("Not supported: imports and exports"),
+        // TypeScript
+        Statement::TSEnumDeclaration(_) => (),
+        Statement::TSExportAssignment(_) => (),
+        Statement::TSGlobalDeclaration(_) => (),
+        Statement::TSImportEqualsDeclaration(_) => (),
+        Statement::TSInterfaceDeclaration(_) => (),
+        Statement::TSModuleDeclaration(_) => (),
+        Statement::TSNamespaceExportDeclaration(_) => (),
+        Statement::TSTypeAliasDeclaration(_) => (),
+    }
+    Ok(())
+}
