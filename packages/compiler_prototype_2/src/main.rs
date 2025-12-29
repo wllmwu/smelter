@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::Parser as CliParser;
 use oxc::{
     allocator::Allocator,
-    ast::ast::{Program, Statement},
+    ast::ast::{Expression, Program, Statement},
     parser::Parser,
     semantic::SemanticBuilder,
     span::SourceType,
@@ -168,7 +168,9 @@ fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Re
         // Basics
         Statement::BlockStatement(block_statement) => todo!(),
         Statement::EmptyStatement(_) => (),
-        Statement::ExpressionStatement(expression_statement) => todo!(),
+        Statement::ExpressionStatement(expression_statement) => {
+            compile_expression(builder, &expression_statement.expression)?
+        }
         // Control flow
         Statement::BreakStatement(break_statement) => todo!(),
         Statement::ContinueStatement(continue_statement) => todo!(),
@@ -203,6 +205,65 @@ fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Re
         Statement::TSModuleDeclaration(_) => (),
         Statement::TSNamespaceExportDeclaration(_) => (),
         Statement::TSTypeAliasDeclaration(_) => (),
+    }
+    Ok(())
+}
+
+fn compile_expression(builder: &mut DataPackBuilder, expression: &Expression) -> Result<()> {
+    match expression {
+        // Literal values
+        Expression::ArrayExpression(array_expression) => todo!(),
+        Expression::BigIntLiteral(big_int_literal) => todo!(),
+        Expression::BooleanLiteral(boolean_literal) => todo!(),
+        Expression::NullLiteral(null_literal) => todo!(),
+        Expression::NumericLiteral(numeric_literal) => todo!(),
+        Expression::ObjectExpression(object_expression) => todo!(),
+        Expression::RegExpLiteral(reg_exp_literal) => todo!(),
+        Expression::StringLiteral(string_literal) => todo!(),
+        Expression::TemplateLiteral(template_literal) => todo!(),
+        // Functions and classes
+        Expression::ArrowFunctionExpression(arrow_function_expression) => todo!(),
+        Expression::ClassExpression(class_expression) => todo!(),
+        Expression::FunctionExpression(function_expression) => todo!(),
+        // References
+        Expression::Identifier(identifier) => todo!(),
+        Expression::MetaProperty(meta_property) => todo!(),
+        Expression::Super(sooper) => todo!(),
+        Expression::ThisExpression(this_expression) => todo!(),
+        // Assignments
+        Expression::AssignmentExpression(assignment_expression) => todo!(),
+        // Member access
+        Expression::ComputedMemberExpression(computed_member_expression) => todo!(),
+        Expression::PrivateFieldExpression(private_field_expression) => todo!(),
+        Expression::StaticMemberExpression(static_member_expression) => todo!(),
+        // Operations
+        Expression::BinaryExpression(binary_expression) => todo!(),
+        Expression::LogicalExpression(logical_expression) => todo!(),
+        Expression::PrivateInExpression(private_in_expression) => todo!(),
+        Expression::UnaryExpression(unary_expression) => todo!(),
+        Expression::UpdateExpression(update_expression) => todo!(),
+        // Function calls
+        Expression::CallExpression(call_expression) => todo!(),
+        Expression::ChainExpression(chain_expression) => todo!(),
+        Expression::NewExpression(new_expression) => todo!(),
+        Expression::TaggedTemplateExpression(tagged_template_expression) => todo!(),
+        // Control flow
+        Expression::AwaitExpression(await_expression) => todo!(),
+        Expression::ConditionalExpression(conditional_expression) => todo!(),
+        Expression::YieldExpression(yield_expression) => todo!(),
+        // Organization
+        Expression::ImportExpression(_) => bail!("Not supported: import expressions"),
+        Expression::ParenthesizedExpression(parenthesized_expression) => todo!(),
+        Expression::SequenceExpression(sequence_expression) => todo!(),
+        // JSX, TypeScript, and other language extensions
+        Expression::JSXElement(_) => bail!("Not supported: JSX expressions"),
+        Expression::JSXFragment(_) => bail!("Not supported: JSX expressions"),
+        Expression::TSAsExpression(_) => (),
+        Expression::TSInstantiationExpression(_) => (),
+        Expression::TSNonNullExpression(_) => (),
+        Expression::TSSatisfiesExpression(_) => (),
+        Expression::TSTypeAssertion(_) => (),
+        Expression::V8IntrinsicExpression(_) => bail!("Not supported: V8 intrinsics"),
     }
     Ok(())
 }
