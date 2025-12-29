@@ -77,6 +77,53 @@ struct Mcfunction {
 
 type DataPack = Vec<Mcfunction>;
 
+struct DataPackBuilder {
+    committed_mcfunctions: Vec<Mcfunction>,
+    compiling_stack: Vec<Mcfunction>,
+}
+
+impl DataPackBuilder {
+    fn new() -> DataPackBuilder {
+        DataPackBuilder {
+            committed_mcfunctions: Vec::new(),
+            compiling_stack: Vec::new(),
+        }
+    }
+
+    fn push_mcfunction(&mut self, name: String) -> &mut Self {
+        self.compiling_stack.push(Mcfunction {
+            name,
+            body: Vec::new(),
+        });
+        self
+    }
+
+    fn commit_mcfunction(&mut self) -> &mut Self {
+        if let Some(mcf) = self.compiling_stack.pop() {
+            self.committed_mcfunctions.push(mcf);
+        }
+        self
+    }
+
+    fn push_command(&mut self, command: String) -> &mut Self {
+        if let Some(mcf) = self.compiling_stack.first_mut() {
+            mcf.body.push(command);
+        }
+        self
+    }
+
+    fn extend_commands(&mut self, commands: Vec<String>) -> &mut Self {
+        if let Some(mcf) = self.compiling_stack.first_mut() {
+            mcf.body.extend(commands);
+        }
+        self
+    }
+
+    fn complete(self) -> DataPack {
+        self.committed_mcfunctions
+    }
+}
+
 fn compile_program(program: Program) -> DataPack {
     Vec::new()
 }
