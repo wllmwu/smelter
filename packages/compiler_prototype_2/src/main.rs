@@ -1,11 +1,14 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser as CliParser;
 use oxc::{
-    allocator::Allocator,
-    ast::ast::{Expression, Program, Statement},
+    allocator::{Allocator, Box as OxcBox},
+    ast::ast::{
+        BindingIdentifier, BindingPattern, BindingPatternKind, BindingRestElement, Expression,
+        FormalParameters, FunctionBody, Program, Statement,
+    },
     parser::Parser,
     semantic::SemanticBuilder,
-    span::SourceType,
+    span::{SourceType, Span},
 };
 
 #[derive(CliParser)]
@@ -138,14 +141,35 @@ fn debug_log_macro(message: String) -> String {
 }
 
 fn compile_program(program: Program) -> Result<DataPack> {
-    let mut builder = DataPackBuilder::new(vec![Mcfunction {
-        name: String::from("initialize"),
-        body: vec![
-            String::from("data modify storage smelter:smelter heap set value []"),
-            String::from("data modify storage smelter:smelter queue set value []"),
-            String::from("data modify storage smelter:smelter stack set value []"),
-        ],
-    }]);
+    let mut builder = DataPackBuilder::new(vec![
+        Mcfunction {
+            name: String::from("initialize"),
+            body: vec![
+                // Memory data structures
+                String::from("data modify storage smelter:smelter heap set value [{bindings: {}}]"),
+                String::from("data modify storage smelter:smelter queue set value []"),
+                String::from("data modify storage smelter:smelter stack set value []"),
+                // Registers
+                String::from("data modify storage smelter:smelter fnenvptr set value 0"),
+                String::from("data modify storage smelter:smelter fnargs set value []"),
+                String::from("data modify storage smelter:smelter fnret set value {}"),
+                String::from("data modify storage smelter:smelter sysargs set value {}"),
+                String::from("data modify storage smelter:smelter sysret set value {}"),
+            ],
+        },
+        Mcfunction {
+            name: String::from("write_binding"),
+            body: vec![
+                debug_log_macro(String::from(
+                    "entering write_binding: heap_index=$(heap_index), identifier=$(identifier), value=$(value)",
+                )),
+                String::from(
+                    "$data modify storage smelter:smelter heap[$(heap_index)].bindings.$(identifier) set value $(value)",
+                ),
+                debug_log(String::from("exiting write_binding")),
+            ],
+        },
+    ]);
 
     builder
         .push_mcfunction(String::from("main"))
@@ -189,7 +213,27 @@ fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Re
         Statement::WithStatement(_) => bail!("Not supported: with statements"),
         // Declarations
         Statement::ClassDeclaration(class_declaration) => todo!(),
-        Statement::FunctionDeclaration(function_declaration) => todo!(),
+        Statement::FunctionDeclaration(function) => {
+            // TypeScript function overloads don't have a body
+            if let Some(body) = &function.body {
+                let file_name = make_function_file_name(&function.id, &function.span);
+                let identifier = function
+                    .id
+                    .as_ref()
+                    .ok_or(anyhow!("Function declaration with no identifier"))?
+                    .name
+                    .to_string();
+                compile_function(builder, file_name.clone(), &function.params, body)?;
+                builder.extend_commands(vec![
+                    debug_log(format!("evaluating function declaration {file_name}")),
+                    format!("data modify storage smelter:smelter sysargs set value {{identifier: {identifier}, value: {{function: {{file_name: '{file_name}', name: '{identifier}'}}}}}}"),
+                    String::from("data modify storage smelter:smelter sysargs.value.function.parent_env set from storage smelter:smelter fnenvptr"),
+                    String::from("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+                    String::from("function smelter:write_binding with storage smelter:smelter sysargs"),
+                    debug_log(format!("done evaluating function declaration {file_name}")),
+                ]);
+            }
+        }
         Statement::VariableDeclaration(variable_declaration) => todo!(),
         // Imports and exports
         Statement::ImportDeclaration(_) => bail!("Not supported: imports and exports"),
@@ -265,5 +309,115 @@ fn compile_expression(builder: &mut DataPackBuilder, expression: &Expression) ->
         Expression::TSTypeAssertion(_) => (),
         Expression::V8IntrinsicExpression(_) => bail!("Not supported: V8 intrinsics"),
     }
+    Ok(())
+}
+
+fn make_function_file_name(id: &Option<BindingIdentifier>, span: &Span) -> String {
+    if let Some(identifier) = id {
+        format!("{}_{}", identifier.name.to_ascii_lowercase(), span.start)
+    } else {
+        format!("anon_func_{}", span.start)
+    }
+}
+
+fn compile_function(
+    builder: &mut DataPackBuilder,
+    file_name: String,
+    parameters: &OxcBox<FormalParameters>,
+    body: &OxcBox<FunctionBody>,
+) -> Result<()> {
+    // Raw command interface
+    let command_directive = body
+        .directives
+        .iter()
+        .find(|directive| directive.directive.starts_with("smelter command"));
+    if let Some(directive) = command_directive {
+        let tokens = directive.directive.split(' ').collect::<Vec<&str>>();
+        if let Some(command) = tokens.get(2) {
+            builder
+                .push_mcfunction(file_name)
+                .extend_commands(vec![
+                    debug_log(format!("entering wrapper function {command}")),
+                    String::from("execute unless data storage smelter:smelter fnargs[0].string run return fail"),
+                    String::from("data modify storage smelter:smelter sysargs.tail set from storage smelter:smelter fnargs[0].string"),
+                    debug_log(format!("returning from wrapper function {command}")),
+                    format!("return run function smelter:{command}_macro with storage smelter:smelter sysargs"),
+                ])
+                .commit_mcfunction();
+            builder
+                .push_mcfunction(format!("{command}_macro"))
+                .extend_commands(vec![
+                    debug_log_macro(format!("entering macro function {command}: tail=$(tail)")),
+                    format!("${command} $(tail)"),
+                    debug_log(format!("exiting macro function {command}")),
+                ])
+                .commit_mcfunction();
+            return Ok(());
+        }
+    }
+
+    // Normal JS function
+    builder
+        .push_mcfunction(file_name.clone())
+        .push_command(format!("entering function {file_name}"));
+
+    // Bind arguments
+    for parameter in parameters.items.iter() {
+        compile_bind_argument(builder, &parameter.pattern)?;
+    }
+    if let Some(rest_parameter) = &parameters.rest {
+        compile_bind_rest_argument(builder, &rest_parameter)?;
+    }
+
+    // Compile body
+    for statement in &body.statements {
+        compile_statement(builder, statement)?;
+    }
+
+    builder
+        .push_command(format!("exiting function {file_name}"))
+        .commit_mcfunction();
+    Ok(())
+}
+
+fn compile_bind_argument(builder: &mut DataPackBuilder, pattern: &BindingPattern) -> Result<()> {
+    match &pattern.kind {
+        BindingPatternKind::ArrayPattern(array_pattern) => todo!(),
+        BindingPatternKind::AssignmentPattern(assignment_pattern) => todo!(),
+        BindingPatternKind::BindingIdentifier(bi) => {
+            let name = bi.name.as_str();
+            builder.extend_commands(vec![
+                debug_log(format!("binding argument {name}")),
+                format!("data modify storage smelter:smelter sysargs set value {{identifier: '{name}'}}"),
+                String::from("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+                format!("execute unless data storage smelter:smelter fnargs[0] run data modify storage smelter:smelter sysargs.value set value {{undefined: true}}"),
+                format!("execute if data storage smelter:smelter fnargs[0] run data modify storage smelter:smelter sysargs.value set from storage smelter:smelter fnargs[0]"),
+                String::from("function smelter:write_binding with storage smelter:smelter sysargs"),
+                String::from("data remove storage smelter:smelter fnargs[0]"),
+                debug_log(format!("done binding argument {name}")),
+            ]);
+        }
+        BindingPatternKind::ObjectPattern(object_pattern) => todo!(),
+    }
+    Ok(())
+}
+
+fn compile_bind_rest_argument(
+    builder: &mut DataPackBuilder,
+    pattern: &BindingRestElement,
+) -> Result<()> {
+    let name = pattern
+        .argument
+        .get_identifier_name()
+        .map_or(String::from(""), |atom| atom.into_string());
+    builder.extend_commands(vec![
+        debug_log(format!("binding rest argument {name}")),
+        format!("data modify storage smelter:smelter sysargs set value {{identifier: '{name}'}}"),
+        String::from("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+        String::from("data modify storage smelter:smelter sysargs.value set from storage smelter:smelter fnargs"),
+        String::from("function smelter:write_binding with storage smelter:smelter sysargs"),
+        String::from("data modify storage smelter:smelter fnargs set value []"),
+        debug_log(format!("done binding rest argument {name}")),
+    ]);
     Ok(())
 }
