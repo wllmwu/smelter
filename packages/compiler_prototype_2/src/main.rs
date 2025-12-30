@@ -146,7 +146,9 @@ fn compile_program(program: Program) -> Result<DataPack> {
             name: String::from("initialize"),
             body: vec![
                 // Memory data structures
-                String::from("data modify storage smelter:smelter heap set value [{bindings: {}}]"),
+                String::from(
+                    "data modify storage smelter:smelter heap set value [{parent: -1, bindings: {}, evaluations: {}}]",
+                ),
                 String::from("data modify storage smelter:smelter queue set value []"),
                 String::from("data modify storage smelter:smelter stack set value []"),
                 // Registers
@@ -167,6 +169,18 @@ fn compile_program(program: Program) -> Result<DataPack> {
                     "$data modify storage smelter:smelter heap[$(heap_index)].bindings.$(identifier) set value $(value)",
                 ),
                 debug_log(String::from("exiting write_binding")),
+            ],
+        },
+        Mcfunction {
+            name: String::from("write_evaluation"),
+            body: vec![
+                debug_log_macro(String::from(
+                    "entering write_evaluation: heap_index=$(heap_index), expression_id=$(expression_id), value=$(value)",
+                )),
+                String::from(
+                    "$data modify storage smelter:smelter heap[$(heap_index)].evaluations.$(expression_id) set value $(value)",
+                ),
+                debug_log(String::from("exiting write_evaluation")),
             ],
         },
     ]);
@@ -193,7 +207,8 @@ fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Re
         Statement::BlockStatement(block_statement) => todo!(),
         Statement::EmptyStatement(_) => (),
         Statement::ExpressionStatement(expression_statement) => {
-            compile_expression(builder, &expression_statement.expression)?
+            let expression_id = make_expression_id(&expression_statement.span);
+            compile_expression(builder, &expression_statement.expression, expression_id)?
         }
         // Control flow
         Statement::BreakStatement(break_statement) => todo!(),
@@ -217,7 +232,7 @@ fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Re
             // TypeScript function overloads don't have a body
             if let Some(body) = &function.body {
                 let file_name = make_function_file_name(&function.id, &function.span);
-                let identifier = function
+                let function_name = function
                     .id
                     .as_ref()
                     .ok_or(anyhow!("Function declaration with no identifier"))?
@@ -226,7 +241,7 @@ fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Re
                 compile_function(builder, file_name.clone(), &function.params, body)?;
                 builder.extend_commands(vec![
                     debug_log(format!("evaluating function declaration {file_name}")),
-                    format!("data modify storage smelter:smelter sysargs set value {{identifier: {identifier}, value: {{function: {{file_name: '{file_name}', name: '{identifier}'}}}}}}"),
+                    format!("data modify storage smelter:smelter sysargs set value {{identifier: '{function_name}', value: {{function: {{file_name: '{file_name}', function_name: '{function_name}'}}}}}}"),
                     String::from("data modify storage smelter:smelter sysargs.value.function.parent_env set from storage smelter:smelter fnenvptr"),
                     String::from("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
                     String::from("function smelter:write_binding with storage smelter:smelter sysargs"),
@@ -253,7 +268,15 @@ fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Re
     Ok(())
 }
 
-fn compile_expression(builder: &mut DataPackBuilder, expression: &Expression) -> Result<()> {
+fn make_expression_id(span: &Span) -> String {
+    format!("expr_{}", span.start)
+}
+
+fn compile_expression(
+    builder: &mut DataPackBuilder,
+    expression: &Expression,
+    expression_id: String,
+) -> Result<()> {
     match expression {
         // Literal values
         Expression::ArrayExpression(array_expression) => todo!(),
@@ -266,9 +289,44 @@ fn compile_expression(builder: &mut DataPackBuilder, expression: &Expression) ->
         Expression::StringLiteral(string_literal) => todo!(),
         Expression::TemplateLiteral(template_literal) => todo!(),
         // Functions and classes
-        Expression::ArrowFunctionExpression(arrow_function_expression) => todo!(),
+        Expression::ArrowFunctionExpression(arrow_function_expression) => {
+            let file_name = make_function_file_name(&None, &arrow_function_expression.span);
+            compile_function(
+                builder,
+                file_name.clone(),
+                &arrow_function_expression.params,
+                &arrow_function_expression.body,
+            )?;
+            builder.extend_commands(vec![
+                debug_log(format!("evaluating arrow function expression {file_name}")),
+                format!("data modify storage smelter:smelter sysargs set value {{expression_id: '{expression_id}', value: {{function: {{file_name: '{file_name}'}}}}}}"),
+                String::from("data modify storage smelter:smelter sysargs.value.function.parent_env set from storage smelter:smelter fnenvptr"),
+                String::from("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+                String::from("function smelter:write_evaluation with storage smelter:smelter sysargs"),
+                debug_log(format!("done evaluating arrow function expression {file_name}")),
+            ]);
+        }
         Expression::ClassExpression(class_expression) => todo!(),
-        Expression::FunctionExpression(function_expression) => todo!(),
+        Expression::FunctionExpression(function) => {
+            if let Some(body) = &function.body {
+                let file_name = make_function_file_name(&function.id, &function.span);
+                let function_name = &function.id.as_ref().map(|id| id.name.to_string());
+                compile_function(builder, file_name.clone(), &function.params, body)?;
+                builder.extend_commands(vec![
+                    debug_log(format!("evaluating function expression {file_name}")),
+                    format!("data modify storage smelter:smelter sysargs set value {{expression_id: '{expression_id}', value: {{function: {{file_name: '{file_name}'}}}}}}"),
+                ]);
+                if let Some(name) = function_name {
+                    builder.push_command(format!("data modify storage smelter:smelter sysargs.value.function.function_name set value '{name}'"));
+                }
+                builder.extend_commands(vec![
+                    String::from("data modify storage smelter:smelter sysargs.value.function.parent_env set from storage smelter:smelter fnenvptr"),
+                    String::from("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+                    String::from("function smelter:write_evaluation with storage smelter:smelter sysargs"),
+                    debug_log(format!("done evaluating function expression {file_name}")),
+                ]);
+            }
+        }
         // References
         Expression::Identifier(identifier) => todo!(),
         Expression::MetaProperty(meta_property) => todo!(),
