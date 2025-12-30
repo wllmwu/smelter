@@ -157,6 +157,49 @@ fn compile_program(program: Program) -> Result<DataPack> {
                 String::from("data modify storage smelter:smelter fnret set value {}"),
                 String::from("data modify storage smelter:smelter sysargs set value {}"),
                 String::from("data modify storage smelter:smelter sysret set value {}"),
+                // Arithmetic
+                String::from("scoreboard objectives add smelter_internal dummy"),
+            ],
+        },
+        Mcfunction {
+            name: String::from("resolve_identifier"),
+            body: vec![
+                debug_log_macro(String::from(
+                    "entering resolve_identifier: identifier=$(identifier), heap_index=$(heap_index)",
+                )),
+                // Clear sysret register
+                String::from("data modify storage smelter:smelter sysret set value {}"),
+                // If binding exists in this environment, then return resolved
+                String::from(
+                    "$execute if data storage smelter:smelter heap[$(heap_index)].bindings.$(identifier) run data modify storage smelter:smelter sysret set value {resolved: {env: $(heap_index)}}",
+                ),
+                String::from(
+                    "$execute if data storage smelter:smelter heap[$(heap_index)].bindings.$(identifier) run data modify storage smelter:smelter sysret.resolved.value set from storage smelter:smelter heap[$(heap_index)].bindings.$(identifier)",
+                ),
+                debug_log(String::from(
+                    "resolve_identifier: checking if binding exists",
+                )),
+                String::from(
+                    "$execute if data storage smelter:smelter heap[$(heap_index)].bindings.$(identifier) run return 1",
+                ),
+                // Else if no parent, return fail
+                String::from(
+                    "$execute store result score #resolve_identifier__parent_index smelter_internal run data get storage smelter:smelter heap[$(heap_index)].parent",
+                ),
+                debug_log(String::from(
+                    "resolve_identifier: checking if parent exists",
+                )),
+                String::from(
+                    "execute if score #resolve_identifier__parent_index smelter_internal matches ..-1 run return fail",
+                ),
+                // Else, repeat on parent
+                String::from(
+                    "execute store result storage smelter:smelter sysargs.heap_index int 1 run scoreboard players get #resolve_identifier__parent_index smelter_internal",
+                ),
+                debug_log(String::from("resolve_identifier: calling on parent")),
+                String::from(
+                    "return run function smelter:resolve_identifier with storage smelter:smelter sysargs",
+                ),
             ],
         },
         Mcfunction {
@@ -337,7 +380,25 @@ fn compile_expression(
             }
         }
         // References
-        Expression::Identifier(identifier) => todo!(),
+        Expression::Identifier(identifier_reference) => {
+            let identifier = identifier_reference.name.as_str();
+            builder.extend_commands(vec![
+                debug_log(format!("evaluating identifier {identifier}")),
+                // Resolve identifier
+                format!("data modify storage smelter:smelter sysargs set value {{identifier: '{identifier}'}}"),
+                format!("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+                String::from("function smelter:resolve_identifier with storage smelter:smelter sysargs"),
+                // Throw if unresolved
+                format!("execute unless data storage smelter:smelter sysret.resolved run data modify storage smelter:smelter fnret set value {{throw: {{type: 'ReferenceError', message: 'No binding exists for identifier {identifier}'}}}}"),
+                String::from("execute unless data storage smelter:smelter sysret.resolved run return fail"),
+                // Write evaluation
+                format!("data modify storage smelter:smelter sysargs set value {{expression_id: '{expression_id}'}}"),
+                String::from("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+                String::from("data modify storage smelter:smelter sysargs.value set from storage smelter:smelter sysret.resolved.value"),
+                String::from("function smelter:write_evaluation with storage smelter:smelter sysargs"),
+                debug_log(format!("done evaluating identifier {identifier}")),
+            ]);
+        }
         Expression::MetaProperty(meta_property) => todo!(),
         Expression::Super(sooper) => todo!(),
         Expression::ThisExpression(this_expression) => todo!(),
