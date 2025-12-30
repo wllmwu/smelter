@@ -286,7 +286,16 @@ fn compile_expression(
         Expression::NumericLiteral(numeric_literal) => todo!(),
         Expression::ObjectExpression(object_expression) => todo!(),
         Expression::RegExpLiteral(reg_exp_literal) => todo!(),
-        Expression::StringLiteral(string_literal) => todo!(),
+        Expression::StringLiteral(string_literal) => {
+            let string_value = string_literal.value.as_str();
+            builder.extend_commands(vec![
+                debug_log(format!("evaluating string literal {string_value}")),
+                format!("data modify storage smelter:smelter sysargs set value {{expression_id: '{expression_id}', value: {{string: '{string_value}'}}}}"),
+                String::from("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+                String::from("function smelter:write_evaluation with storage smelter:smelter sysargs"),
+                debug_log(format!("done evaluating string literal {string_value}")),
+            ]);
+        }
         Expression::TemplateLiteral(template_literal) => todo!(),
         // Functions and classes
         Expression::ArrowFunctionExpression(arrow_function_expression) => {
