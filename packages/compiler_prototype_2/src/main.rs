@@ -3,8 +3,8 @@ use clap::Parser as CliParser;
 use oxc::{
     allocator::{Allocator, Box as OxcBox},
     ast::ast::{
-        BindingIdentifier, BindingPattern, BindingPatternKind, BindingRestElement, Expression,
-        FormalParameters, FunctionBody, Program, Statement,
+        BindingIdentifier, BindingPattern, BindingRestElement, Expression, FormalParameters,
+        FunctionBody, Program, Statement,
     },
     parser::Parser,
     semantic::SemanticBuilder,
@@ -624,7 +624,7 @@ fn compile_function(
         compile_bind_argument(builder, &parameter.pattern)?;
     }
     if let Some(rest_parameter) = &parameters.rest {
-        compile_bind_rest_argument(builder, &rest_parameter)?;
+        compile_bind_rest_argument(builder, &rest_parameter.rest)?;
     }
 
     // Compile body
@@ -639,10 +639,10 @@ fn compile_function(
 }
 
 fn compile_bind_argument(builder: &mut DataPackBuilder, pattern: &BindingPattern) -> Result<()> {
-    match &pattern.kind {
-        BindingPatternKind::ArrayPattern(array_pattern) => todo!(),
-        BindingPatternKind::AssignmentPattern(assignment_pattern) => todo!(),
-        BindingPatternKind::BindingIdentifier(bi) => {
+    match &pattern {
+        BindingPattern::ArrayPattern(array_pattern) => todo!(),
+        BindingPattern::AssignmentPattern(assignment_pattern) => todo!(),
+        BindingPattern::BindingIdentifier(bi) => {
             let name = bi.name.as_str();
             builder.extend_commands(vec![
                 debug_log(format!("binding argument {name}")),
@@ -655,7 +655,7 @@ fn compile_bind_argument(builder: &mut DataPackBuilder, pattern: &BindingPattern
                 debug_log(format!("done binding argument {name}")),
             ]);
         }
-        BindingPatternKind::ObjectPattern(object_pattern) => todo!(),
+        BindingPattern::ObjectPattern(object_pattern) => todo!(),
     }
     Ok(())
 }
