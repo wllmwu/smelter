@@ -8,7 +8,7 @@ use oxc::{
     },
     parser::Parser,
     semantic::SemanticBuilder,
-    span::{SourceType, Span},
+    span::{GetSpan, SourceType, Span},
 };
 
 #[derive(CliParser)]
@@ -162,6 +162,78 @@ fn compile_program(program: Program) -> Result<DataPack> {
             ],
         },
         Mcfunction {
+            name: String::from("push_environment"),
+            body: vec![
+                debug_log_macro(String::from("entering push_environment: parent=$(parent)")),
+                String::from(
+                    "data modify storage smelter:smelter stack append from storage smelter:smelter fnenvptr",
+                ),
+                String::from(
+                    "execute store result storage smelter:smelter fnenvptr int 1 run data get storage smelter:smelter heap",
+                ),
+                String::from(
+                    "$data modify storage smelter:smelter heap append value {parent: $(parent), bindings: {}, evaluations: {}}",
+                ),
+                debug_log(String::from("exiting push_environment")),
+            ],
+        },
+        Mcfunction {
+            name: String::from("pop_environment"),
+            body: vec![
+                debug_log(String::from("entering pop_environment")),
+                String::from(
+                    "execute store result score #pop_environment__stack_last smelter_internal run data get storage smelter:smelter stack",
+                ),
+                String::from(
+                    "scoreboard players remove #pop_environment__stack_last smelter_internal 1",
+                ),
+                String::from("data modify storage smelter:smelter sysargs set value {}"),
+                String::from(
+                    "execute store result storage smelter:smelter sysargs.stack_last int 1 run scoreboard players get #pop_environment__stack_last smelter_internal",
+                ),
+                String::from(
+                    "function smelter:pop_environment_inner with storage smelter:smelter sysargs",
+                ),
+                debug_log(String::from("exiting pop_environment")),
+            ],
+        },
+        Mcfunction {
+            name: String::from("pop_environment_inner"),
+            body: vec![
+                debug_log(String::from(
+                    "entering pop_environment_inner: stack_last=$(stack_last)",
+                )),
+                String::from(
+                    "data modify storage smelter:smelter fnenvptr set from storage smelter:smelter stack[$(stack_last)]",
+                ),
+                String::from("data remove storage smelter:smelter stack[$(stack_last)]"),
+                debug_log(String::from("exiting pop_environment_inner")),
+            ],
+        },
+        Mcfunction {
+            name: String::from("invoke_function"),
+            body: vec![
+                debug_log_macro(String::from(
+                    "entering invoke_function: file_name=$(file_name)",
+                )),
+                String::from("$function smelter:$(file_name)"),
+                debug_log(String::from("exiting invoke_function")),
+            ],
+        },
+        Mcfunction {
+            name: String::from("read_evaluation"),
+            body: vec![
+                debug_log_macro(String::from(
+                    "entering read_evaluation: heap_index=$(heap_index), expression_id=$(expression_id)",
+                )),
+                String::from("data modify storage smelter:smelter sysret set value {}"),
+                String::from(
+                    "$data modify storage smelter:smelter sysret.value set from heap[$(heap_index)].evaluations.$(expression_id)",
+                ),
+                debug_log(String::from("exiting read_evaluation")),
+            ],
+        },
+        Mcfunction {
             name: String::from("resolve_identifier"),
             body: vec![
                 debug_log_macro(String::from(
@@ -251,7 +323,7 @@ fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Re
         Statement::EmptyStatement(_) => (),
         Statement::ExpressionStatement(expression_statement) => {
             let expression_id = make_expression_id(&expression_statement.span);
-            compile_expression(builder, &expression_statement.expression, expression_id)?
+            compile_expression(builder, &expression_statement.expression, &expression_id)?
         }
         // Control flow
         Statement::BreakStatement(break_statement) => todo!(),
@@ -315,10 +387,14 @@ fn make_expression_id(span: &Span) -> String {
     format!("expr_{}", span.start)
 }
 
+fn make_expression_id_prefixed(span: &Span, prefix: &str) -> String {
+    format!("{}_expr_{}", prefix, span.start)
+}
+
 fn compile_expression(
     builder: &mut DataPackBuilder,
     expression: &Expression,
-    expression_id: String,
+    expression_id: &String,
 ) -> Result<()> {
     match expression {
         // Literal values
@@ -415,7 +491,61 @@ fn compile_expression(
         Expression::UnaryExpression(unary_expression) => todo!(),
         Expression::UpdateExpression(update_expression) => todo!(),
         // Function calls
-        Expression::CallExpression(call_expression) => todo!(),
+        Expression::CallExpression(call_expression) => {
+            builder.push_command(debug_log(String::from("evaluating call expression")));
+            // Evaluate callee first
+            let callee_expr_id = make_expression_id_prefixed(&call_expression.span, "callee");
+            compile_expression(builder, &call_expression.callee, &callee_expr_id)?;
+            // Evaluate each argument and populate fnargs register
+            for argument in &call_expression.arguments {
+                let argument_expr_id = make_expression_id(&argument.span());
+                if let Some(argument_expr) = argument.as_expression() {
+                    compile_expression(builder, argument_expr, &argument_expr_id)?;
+                    builder.extend_commands(vec![
+                        format!("data modify storage smelter:smelter sysargs set value {{expression_id: '{argument_expr_id}'}}"),
+                        String::from("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+                        String::from("function smelter:read_evaluation with storage smelter:smelter sysargs"),
+                        String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter sysret"),
+                    ]);
+                } else {
+                    todo!();
+                }
+            }
+            // Invoke the callee
+            builder.extend_commands(vec![
+                format!("data modify storage smelter:smelter sysargs set value {{expression_id: '{callee_expr_id}'}}"),
+                String::from("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+                String::from("function smelter:read_evaluation with storage smelter:smelter sysargs"),
+                // Throw if not a function
+                String::from("execute unless data storage smelter:smelter sysret.value.function run data modify storage smelter:smelter fnret set value {throw: {type: 'TypeError', message: 'Tried to call something that is not a function'}}"),
+                String::from("execute unless data storage smelter:smelter sysret.value.function run return fail"),
+                // Setup: Push new environment
+                String::from("data modify storage smelter:smelter sysargs set value {}"),
+                String::from("data modify storage smelter:smelter sysargs.parent set from storage smelter:smelter sysret.value.function.parent_env"),
+                String::from("function smelter:push_environment with storage smelter:smelter sysargs"),
+                // Setup: Bind function name if present
+                String::from("execute if data storage smelter:smelter sysret.value.function.function_name run data modify storage smelter:smelter sysargs set value {}"),
+                String::from("execute if data storage smelter:smelter sysret.value.function.function_name run data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+                String::from("execute if data storage smelter:smelter sysret.value.function.function_name run data modify storage smelter:smelter sysargs.identifier set from storage smelter:smelter sysret.value.function.function_name"),
+                String::from("execute if data storage smelter:smelter sysret.value.function.function_name run data modify storage smelter:smelter sysargs.value set from storage smelter:smelter sysret.value.function"),
+                String::from("function smelter:write_binding with storage smelter:smelter sysargs"),
+                // Run function
+                String::from("data modify storage smelter:smelter sysargs set value {}"),
+                String::from("data modify storage smelter:smelter sysargs.file_name set from storage smelter:smelter sysret.value.function.file_name"),
+                String::from("function smelter:invoke_function with storage smelter:smelter sysargs"),
+                // Teardown: Pop stack
+                String::from("function smelter:pop_environment"),
+                // Rethrow if callee threw exception
+                String::from("execute if data storage smelter:smelter fnret.throw run return fail"),
+                // Evaluate to value returned from callee
+                format!("data modify storage smelter:smelter sysargs set value {{expression_id: '{expression_id}'}}"),
+                String::from("data modify storage smelter:smelter sysargs.heap_index set from storage smelter:smelter fnenvptr"),
+                String::from("execute if data storage smelter:smelter fnret.return data modify storage smelter:smelter sysargs.value set from storage smelter:smelter fnret.return"),
+                String::from("execute unless data storage smelter:smelter fnret.return data modify storage smelter:smelter sysargs.value set value {undefined: true}"),
+                String::from("function smelter:write_evaluation with storage smelter:smelter sysargs"),
+                debug_log(String::from("done evaluating call expression")),
+            ]);
+        }
         Expression::ChainExpression(chain_expression) => todo!(),
         Expression::NewExpression(new_expression) => todo!(),
         Expression::TaggedTemplateExpression(tagged_template_expression) => todo!(),
