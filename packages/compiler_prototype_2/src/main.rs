@@ -5,7 +5,7 @@ use oxc::{
     ast::ast::{Expression, Program, Statement},
     parser::Parser,
     semantic::SemanticBuilder,
-    span::SourceType,
+    span::{SourceType, Span},
 };
 
 #[derive(CliParser)]
@@ -168,6 +168,16 @@ fn compile_program(program: Program) -> Result<DataPack> {
                 "data modify storage smelter:smelter internal_current set value {}",
                 "data modify storage smelter:smelter fnargs set value []",
                 "data modify storage smelter:smelter fnret set value {}",
+                "data modify storage smelter:smelter macroargs set value {}",
+            ],
+        ),
+        Mcfunction::new_static(
+            "syscall/allocate_on_heap",
+            &["value"],
+            &[
+                "data modify storage smelter:smelter fnret set value {}",
+                "execute store result storage smelter:smelter fnret.pointer int 1 run data get storage smelter:smelter heap",
+                "data modify storage smelter:smelter heap append from storage smelter:smelter internal_current.value",
             ],
         ),
         Mcfunction::new_static(
@@ -186,7 +196,104 @@ fn compile_program(program: Program) -> Result<DataPack> {
                 "data remove storage smelter:smelter internal_stack[-1]",
             ],
         ),
+        Mcfunction::new_static(
+            "syscall/macro_dereference_heap",
+            &[],
+            &[
+                "data modify storage smelter:smelter $(output_path) set from storage smelter:smelter heap[$(heap_index)]",
+            ],
+        ),
         // Abstract operations
+        Mcfunction::new_static(
+            "absop/get_identifier_reference",
+            &["env", "name"],
+            &[
+                // If env is null, return UNRESOLVABLE
+                "execute if data storage smelter:smelter internal_current.env.null run data modify storage smelter:smelter fnargs set value [{record_type: {ReferenceRecord: true}, Base: {UNRESOLVABLE: true}, ThisValue: {EMPTY: true}}]",
+                "execute if data storage smelter:smelter internal_current.env.null run data modify storage smelter:smelter fnargs[0].ReferencedName set from storage smelter:smelter internal_current.name",
+                "execute if data storage smelter:smelter internal_current.env.null run function smelter:syscall/set_up_call",
+                "execute if data storage smelter:smelter internal_current.env.null run function smelter:syscall/allocate_on_heap",
+                "execute if data storage smelter:smelter internal_current.env.null run function smelter:syscall/tear_down_call",
+                "execute if data storage smelter:smelter internal_current.env.null run data modify storage smelter:smelter internal_current._pointer set from storage smelter:smelter fnret.pointer",
+                "execute if data storage smelter:smelter internal_current.env.null run data modify storage smelter:smelter fnret set value {Type: {NORMAL: true}, Value: {}}",
+                "execute if data storage smelter:smelter internal_current.env.null run data modify storage smelter:smelter fnret.Value.record set from storage smelter:smelter internal_current._pointer",
+                "execute if data storage smelter:smelter internal_current.env.null run return 1",
+                // Let exists be ?env.HasBinding(name)
+                "data modify storage smelter:smelter fnargs set value []",
+                "data modify storage smelter:smelter fnargs append from internal_current.env",
+                "data modify storage smelter:smelter fnargs append from internal_current.name",
+                "function smelter:syscall/set_up_call",
+                "function smelter:absop/has_binding",
+                "function smelter:syscall/tear_down_call",
+                "execute unless data storage smelter:smelter fnret.Type.NORMAL run return 1",
+                "data modify storage smelter:smelter internal_current.exists set from storage smelter:smelter fnret.CompletionRecord.Value",
+                // If exists is true, return resolved
+                "execute if data storage smelter:smelter internal_current.exists.boolean.true run data modify storage smelter:smelter fnargs set value [{record_type: {ReferenceRecord: true}, ThisValue: {EMPTY: true}}]",
+                "execute if data storage smelter:smelter internal_current.exists.boolean.true run data modify storage smelter:smelter fnargs[0].Base set from storage smelter:smelter internal_current.env",
+                "execute if data storage smelter:smelter internal_current.exists.boolean.true run function smelter:syscall/set_up_call",
+                "execute if data storage smelter:smelter internal_current.exists.boolean.true run function smelter:syscall/allocate_on_heap",
+                "execute if data storage smelter:smelter internal_current.exists.boolean.true run function smelter:syscall/tear_down_call",
+                "execute if data storage smelter:smelter internal_current.exists.boolean.true run data modify storage smelter:smelter internal_current._pointer set from storage smelter:smelter fnret.pointer",
+                "execute if data storage smelter:smelter internal_current.exists.boolean.true run data modify storage smelter:smelter fnret set value {Type: {NORMAL: true}, Value: {}}",
+                "execute if data storage smelter:smelter internal_current.exists.boolean.true run data modify storage smelter:smelter fnret.Value.record set from storage smelter:smelter internal_current._pointer",
+                "execute if data storage smelter:smelter internal_current.exists.boolean.true run return 1",
+                // Else, recursion on env.[[OuterEnv]]
+                "data modify storage smelter:smelter macroargs set value {output_path: 'internal_current._deref_env'}",
+                "data modify storage smelter:smelter macroargs.heap_index set from storage smelter:smelter internal_current.env.record",
+                "function smelter:syscall/macro_dereference_heap with storage smelter:smelter macroargs",
+                "data modify storage smelter:smelter internal_current.outer set from storage smelter:smelter internal_current._deref_env.OuterEnv",
+                "data modify storage smelter:smelter fnargs set value []",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_current.outer",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_current.name",
+                "function smelter:syscall/set_up_call",
+                "function smelter:absop/get_identifier_reference",
+                "function smelter:absop/tear_down_call",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/has_binding",
+            &["env", "N"],
+            &[
+                "data modify storage smelter:smelter macroargs set value {output_path: 'internal_current._deref_env'}",
+                "data modify storage smelter:smelter macroargs.heap_index set from storage smelter:smelter internal_current.env.record",
+                "function smelter:syscall/macro_dereference_heap_field with storage smelter:smelter macroargs",
+                // DeclarativeEnvironmentRecord
+                "execute if data storage smelter:smelter internal_current._deref_env.record_type.DeclarativeEnvironmentRecord run data modify storage smelter:smelter macroargs set value {}",
+                "execute if data storage smelter:smelter internal_current._deref_env.record_type.DeclarativeEnvironmentRecord run data modify storage smelter:smelter macroargs.N set from storage smelter:smelter internal_current.N.string",
+                "execute if data storage smelter:smelter internal_current._deref_env.record_type.DeclarativeEnvironmentRecord run function smelter:has_binding__declarative",
+                // FunctionEnvironmentRecord
+                "execute if data storage smelter:smelter internal_current._deref_env.record_type.FunctionEnvironmentRecord run data modify storage smelter:smelter macroargs set value {}",
+                "execute if data storage smelter:smelter internal_current._deref_env.record_type.FunctionEnvironmentRecord run data modify storage smelter:smelter macroargs.N set from storage smelter:smelter internal_current.N.string",
+                "execute if data storage smelter:smelter internal_current._deref_env.record_type.FunctionEnvironmentRecord run function smelter:has_binding__declarative",
+                // Return completion
+                "data modify storage smelter:smelter internal_current._value set from storage smelter:smelter fnret",
+                "data modify storage smelter:smelter fnret set value {Type: {NORMAL: true}, Value: {}}",
+                "data modify storage smelter:smelter fnret.Value set from storage smelter:smelter internal_current._value",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/has_binding__declarative",
+            &[],
+            &[
+                "data modify storage smelter:smelter fnret set value {boolean: {false: true}}",
+                "execute if data storage smelter:smelter internal_current._deref_env.bindings.$(N) run data modify storage smelter:smelter fnret set value {boolean: {true: true}}",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/resolve_binding",
+            &["name", "env"],
+            &[
+                // If env not provided, set to running execution context's LexicalEnvironment
+                "execute unless data storage smelter:smelter internal_current.env.record run data modify storage smelter:smelter internal_current.env set from storage smelter:smelter execution_stack[-1].LexicalEnvironment",
+                // Call GetIdentifierReference and return result directly
+                "data modify storage smelter:smelter fnargs set value []",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_current.env",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_current.name",
+                "function smelter:syscall/set_up_call",
+                "function smelter:absop/get_identifier_reference",
+                "function smelter:absop/tear_down_call",
+            ],
+        ),
     ]);
 
     builder
@@ -211,7 +318,8 @@ fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Re
         Statement::BlockStatement(block_statement) => todo!(),
         Statement::EmptyStatement(_) => (),
         Statement::ExpressionStatement(expression_statement) => {
-            compile_expression(builder, &expression_statement.expression)?
+            let expression_id = make_expression_id(&expression_statement.span);
+            compile_expression(builder, &expression_statement.expression, &expression_id)?
         }
         // Control flow
         Statement::BreakStatement(break_statement) => todo!(),
@@ -251,7 +359,15 @@ fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Re
     Ok(())
 }
 
-fn compile_expression(builder: &mut DataPackBuilder, expression: &Expression) -> Result<()> {
+fn make_expression_id(span: &Span) -> String {
+    format!("expr_{}", span.start)
+}
+
+fn compile_expression(
+    builder: &mut DataPackBuilder,
+    expression: &Expression,
+    expression_id: &String,
+) -> Result<()> {
     match expression {
         // Literal values
         Expression::ArrayExpression(array_expression) => todo!(),
@@ -268,7 +384,19 @@ fn compile_expression(builder: &mut DataPackBuilder, expression: &Expression) ->
         Expression::ClassExpression(class) => todo!(),
         Expression::FunctionExpression(function) => todo!(),
         // References
-        Expression::Identifier(identifier_reference) => todo!(),
+        Expression::Identifier(identifier_reference) => {
+            let string_value = identifier_reference.name.as_str();
+            builder.extend_commands(vec![
+                debug_log(format!("evaluating identifier {string_value}")),
+                format!("data modify storage smelter:smelter fnargs set value [{{string: '{string_value}'}}]"),
+                String::from("function smelter:syscall/set_up_call"),
+                String::from("function smelter:absop/resolve_binding"),
+                String::from("function smelter:syscall/tear_down_call"),
+                String::from("execute unless data storage smelter:smelter fnret.Type.NORMAL run return 1"),
+                format!("data modify storage smelter:smelter execution_stack[-1].evaluations.{expression_id} set from storage smelter:smelter fnret.Value"),
+                debug_log(format!("done evaluating identifier {string_value}")),
+            ]);
+        }
         Expression::MetaProperty(meta_property) => todo!(),
         Expression::Super(sooper) => todo!(),
         Expression::ThisExpression(this_expression) => todo!(),
