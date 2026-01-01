@@ -78,6 +78,21 @@ struct Mcfunction {
     body: Vec<String>,
 }
 
+impl Mcfunction {
+    fn new_static(name: &str, parameters: &[&str], body: &[&str]) -> Mcfunction {
+        let preamble = parameters
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| format!("data modify storage smelter:smelter current_internal.{s} set from storage smelter:smelter fnargs[{i}]"));
+        Mcfunction {
+            name: String::from(name),
+            body: preamble
+                .chain(body.into_iter().map(|s| String::from(*s)))
+                .collect(),
+        }
+    }
+}
+
 type DataPack = Vec<Mcfunction>;
 
 struct DataPackBuilder {
@@ -138,14 +153,41 @@ fn debug_log_macro(message: String) -> String {
 }
 
 fn compile_program(program: Program) -> Result<DataPack> {
-    let mut builder = DataPackBuilder::new(vec![Mcfunction {
-        name: String::from("initialize"),
-        body: vec![
-            String::from("data modify storage smelter:smelter heap set value []"),
-            String::from("data modify storage smelter:smelter queue set value []"),
-            String::from("data modify storage smelter:smelter stack set value []"),
-        ],
-    }]);
+    let mut builder = DataPackBuilder::new(vec![
+        // System calls
+        Mcfunction::new_static(
+            "syscall/initialize",
+            &[],
+            &[
+                // Memory data structures
+                "data modify storage smelter:smelter heap set value []",
+                "data modify storage smelter:smelter job_queue set value []",
+                "data modify storage smelter:smelter execution_stack set value []",
+                "data modify storage smelter:smelter internal_stack set value []",
+                // Registers
+                "data modify storage smelter:smelter internal_current set value {}",
+                "data modify storage smelter:smelter fnargs set value []",
+                "data modify storage smelter:smelter fnret set value {}",
+            ],
+        ),
+        Mcfunction::new_static(
+            "syscall/set_up_call",
+            &[],
+            &[
+                "data modify storage smelter:smelter internal_stack append from storage smelter:smelter internal_current",
+                "data modify storage smelter:smelter internal_current set value {}",
+            ],
+        ),
+        Mcfunction::new_static(
+            "syscall/tear_down_call",
+            &[],
+            &[
+                "data modify storage smelter:smelter internal_current set from storage smelter:smelter internal_stack[-1]",
+                "data remove storage smelter:smelter internal_stack[-1]",
+            ],
+        ),
+        // Abstract operations
+    ]);
 
     builder
         .push_mcfunction(String::from("main"))
