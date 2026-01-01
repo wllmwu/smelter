@@ -353,12 +353,39 @@ fn compile_expression(
         // Literal values
         Expression::ArrayExpression(array_expression) => todo!(),
         Expression::BigIntLiteral(big_int_literal) => todo!(),
-        Expression::BooleanLiteral(boolean_literal) => todo!(),
-        Expression::NullLiteral(null_literal) => todo!(),
-        Expression::NumericLiteral(numeric_literal) => todo!(),
+        Expression::BooleanLiteral(boolean_literal) => {
+            let value = boolean_literal.value;
+            builder.extend_commands(vec![
+                debug_log(String::from("evaluating boolean literal")),
+                format!("data modify storage smelter:smelter execution_stack[-1].evaluations.{expression_id} set value {{boolean: {{{value}: true}}}}"),
+                debug_log(String::from("done evaluating boolean literal")),
+            ]);
+        }
+        Expression::NullLiteral(null_literal) => {
+            builder.extend_commands(vec![
+                debug_log(String::from("evaluating null literal")),
+                format!("data modify storage smelter:smelter execution_stack[-1].evaluations.{expression_id} set value {{null: true}}"),
+                debug_log(String::from("done evaluating null literal")),
+            ]);
+        }
+        Expression::NumericLiteral(numeric_literal) => {
+            let value = numeric_literal.value;
+            builder.extend_commands(vec![
+                debug_log(String::from("evaluating number literal")),
+                format!("data modify storage smelter:smelter execution_stack[-1].evaluations.{expression_id} set value {{number: {value}d}}"),
+                debug_log(String::from("done evaluating number literal")),
+            ]);
+        }
         Expression::ObjectExpression(object_expression) => todo!(),
         Expression::RegExpLiteral(reg_exp_literal) => todo!(),
-        Expression::StringLiteral(string_literal) => todo!(),
+        Expression::StringLiteral(string_literal) => {
+            let value = string_literal.value.as_str();
+            builder.extend_commands(vec![
+                debug_log(String::from("evaluating string literal")),
+                format!("data modify storage smelter:smelter execution_stack[-1].evaluations.{expression_id} set value {{string: '{value}'}}"),
+                debug_log(String::from("done evaluating string literal")),
+            ]);
+        }
         Expression::TemplateLiteral(template_literal) => todo!(),
         // Functions and classes
         Expression::ArrowFunctionExpression(arrow_function_expression) => todo!(),
