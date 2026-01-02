@@ -328,7 +328,7 @@ fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Re
         Statement::ExportDefaultDeclaration(_) => bail!("Not supported: imports and exports"),
         Statement::ExportNamedDeclaration(_) => bail!("Not supported: imports and exports"),
         // TypeScript
-        Statement::TSEnumDeclaration(_) => (),
+        Statement::TSEnumDeclaration(_) => bail!("Not supported: TypeScript enums"),
         Statement::TSExportAssignment(_) => (),
         Statement::TSGlobalDeclaration(_) => (),
         Statement::TSImportEqualsDeclaration(_) => (),
@@ -409,7 +409,6 @@ fn compile_expression(
         // Assignments
         Expression::AssignmentExpression(assignment_expression) => todo!(),
         // Member access
-        Expression::ChainExpression(chain_expression) => todo!(),
         Expression::ComputedMemberExpression(computed_member_expression) => todo!(),
         Expression::PrivateFieldExpression(private_field_expression) => todo!(),
         Expression::StaticMemberExpression(static_member_expression) => todo!(),
@@ -425,6 +424,7 @@ fn compile_expression(
         Expression::TaggedTemplateExpression(tagged_template_expression) => todo!(),
         // Control flow
         Expression::AwaitExpression(await_expression) => todo!(),
+        Expression::ChainExpression(chain_expression) => todo!(),
         Expression::ConditionalExpression(conditional_expression) => todo!(),
         Expression::YieldExpression(yield_expression) => todo!(),
         // Organization
@@ -434,11 +434,25 @@ fn compile_expression(
         // JSX, TypeScript, and other language extensions
         Expression::JSXElement(_) => bail!("Not supported: JSX expressions"),
         Expression::JSXFragment(_) => bail!("Not supported: JSX expressions"),
-        Expression::TSAsExpression(_) => (),
-        Expression::TSInstantiationExpression(_) => (),
-        Expression::TSNonNullExpression(_) => (),
-        Expression::TSSatisfiesExpression(_) => (),
-        Expression::TSTypeAssertion(_) => (),
+        Expression::TSAsExpression(ts_as_expression) => {
+            compile_expression(builder, &ts_as_expression.expression, expression_id)?;
+        }
+        Expression::TSInstantiationExpression(ts_instantiation_expression) => {
+            compile_expression(
+                builder,
+                &ts_instantiation_expression.expression,
+                expression_id,
+            )?;
+        }
+        Expression::TSNonNullExpression(ts_non_null_expression) => {
+            compile_expression(builder, &ts_non_null_expression.expression, expression_id)?;
+        }
+        Expression::TSSatisfiesExpression(ts_satisfies_expression) => {
+            compile_expression(builder, &ts_satisfies_expression.expression, expression_id)?;
+        }
+        Expression::TSTypeAssertion(ts_type_assertion) => {
+            compile_expression(builder, &ts_type_assertion.expression, expression_id)?;
+        }
         Expression::V8IntrinsicExpression(_) => bail!("Not supported: V8 intrinsics"),
     }
     Ok(())
