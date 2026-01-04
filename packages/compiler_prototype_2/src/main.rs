@@ -20,8 +20,7 @@ fn main() -> Result<()> {
     let content = std::fs::read_to_string(&path)
         .with_context(|| format!("Couldn't read file `{}`", path.display()))?;
 
-    let source_type =
-        SourceType::from_path(path).with_context(|| format!("Couldn't identify source type"))?;
+    let source_type = SourceType::mjs(); // Parse as module to force strict mode
     let allocator = Allocator::default();
     let parser_result = Parser::new(&allocator, &content, source_type).parse();
     let program = parser_result.program;
@@ -200,6 +199,7 @@ fn compile_program(program: Program) -> Result<DataPack> {
             &["env", "name"],
             &[
                 // If env is null, return UNRESOLVABLE
+                // n.b. can do enums with direct string equality comparison in NBT paths e.g. execute if data foo.bar{type: 'baz'} run ... instead of current model using execute if data foo.bar.type.baz run ...
                 "execute if data storage smelter:smelter internal_stack[-1].env.null run data modify storage smelter:smelter fnargs set value [{record_type: {ReferenceRecord: true}, Base: {UNRESOLVABLE: true}, ThisValue: {EMPTY: true}}]",
                 "execute if data storage smelter:smelter internal_stack[-1].env.null run data modify storage smelter:smelter fnargs[0].ReferencedName set from storage smelter:smelter internal_stack[-1].name",
                 "execute if data storage smelter:smelter internal_stack[-1].env.null run function smelter:syscall/allocate_on_heap",
@@ -282,11 +282,23 @@ fn compile_program(program: Program) -> Result<DataPack> {
         .push_command(debug_log(String::from("entering main")))
         .push_command(String::from("function smelter:initialize"));
 
+    builder.extend_commands(vec![
+        // Create module environment record
+        String::from("data modify storage smelter:smelter fnargs set value [{record_type: {ModuleEnvironmentRecord: true}, bindings: {}, OuterEnv: {null: true}}]"),
+        String::from("function smelter:syscall/allocate_on_heap"),
+        // Create and push execution context
+        String::from("data modify storage smelter:smelter execution_stack append value {LexicalEnvironment: {}, evaluations: {}}"),
+        String::from("data modify storage smelter:smelter execution_stack[0].LexicalEnvironment.record set from storage smelter:smelter sysret.pointer"),
+    ]);
+
     for statement in &program.body {
         compile_statement(&mut builder, statement).with_context(|| "Couldn't compile program")?;
     }
 
     builder
+        .push_command(String::from(
+            "data remove storage smelter:smelter execution_stack[-1]",
+        ))
         .push_command(debug_log(String::from("exiting main")))
         .commit_mcfunction();
 
