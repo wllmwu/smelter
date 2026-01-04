@@ -4,7 +4,7 @@ use oxc::{
     allocator::Allocator,
     ast::ast::{Expression, Program, Statement},
     parser::Parser,
-    semantic::SemanticBuilder,
+    semantic::{ScopeId, Scoping, SemanticBuilder},
     span::{SourceType, Span},
 };
 
@@ -51,7 +51,7 @@ fn main() -> Result<()> {
 
     // println!("{:#?}", &program);
 
-    let data_pack = compile_program(program)?;
+    let data_pack = compile_program(&program, semantic_result.semantic.scoping())?;
     std::fs::create_dir_all("smelter_prototype/data/smelter/function")
         .with_context(|| "Couldn't create directories")?;
     for function in data_pack {
@@ -159,7 +159,7 @@ fn debug_log_macro(message: String) -> String {
     format!("${}", debug_log(message))
 }
 
-fn compile_program(program: Program) -> Result<DataPack> {
+fn compile_program(program: &Program, scoping: &Scoping) -> Result<DataPack> {
     let mut builder = DataPackBuilder::new(vec![
         // System calls
         Mcfunction::new_static(
@@ -190,10 +190,28 @@ fn compile_program(program: Program) -> Result<DataPack> {
             "syscall/macro_dereference_heap",
             &[],
             &[
-                "data modify storage smelter:smelter $(output_path) set from storage smelter:smelter heap[$(heap_index)]",
+                "$data modify storage smelter:smelter $(output_path) set from storage smelter:smelter heap[$(heap_index)]",
             ],
         ),
         // Abstract operations
+        Mcfunction::new_static(
+            "absop/create_mutable_binding",
+            &["envRec", "N", "D"],
+            &[
+                "data modify storage smelter:smelter macroargs set value {bound: {}}",
+                "data modify storage smelter:smelter macroargs.heap_index set from storage smelter:smelter internal_stack[-1].envRec.record",
+                "data modify storage smelter:smelter macroargs.N set from storage smelter:smelter internal_stack[-1].N",
+                "execute if data storage smelter:smelter internal_stack[-1].D.boolean.true run data modify storage smelter:smelter macroargs.bound.deletable set value true",
+                "function smelter:absop/create_mutable_binding_macro with storage smelter:smelter macroargs",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/create_mutable_binding_macro",
+            &[],
+            &[
+                "$data modify storage smelter:smelter heap[$(heap_index)].bindings.$(N) set value $(bound)",
+            ],
+        ),
         Mcfunction::new_static(
             "absop/get_identifier_reference",
             &["env", "name"],
@@ -259,7 +277,25 @@ fn compile_program(program: Program) -> Result<DataPack> {
             &[],
             &[
                 "data modify storage smelter:smelter fnret set value {boolean: {false: true}}",
-                "execute if data storage smelter:smelter internal_stack[-1]._deref_env.bindings.$(N) run data modify storage smelter:smelter fnret set value {boolean: {true: true}}",
+                "$execute if data storage smelter:smelter internal_stack[-1]._deref_env.bindings.$(N) run data modify storage smelter:smelter fnret set value {boolean: {true: true}}",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/initialize_binding",
+            &["envRec", "N", "V"],
+            &[
+                "data modify storage smelter:smelter macroargs set value {}",
+                "data modify storage smelter:smelter macroargs.heap_index set from storage smelter:smelter internal_stack[-1].envRec.record",
+                "data modify storage smelter:smelter macroargs.N set from storage smelter:smelter internal_stack[-1].N",
+                "data modify storage smelter:smelter macroargs.V set from storage smelter:smelter internal_stack[-1].V",
+                "function smelter:absop/initialize_binding_macro with storage smelter:smelter macroargs",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/initialize_binding_macro",
+            &[],
+            &[
+                "$data modify storage smelter:smelter heap[$(heap_index)].bindings.$(N).value set value $(V)",
             ],
         ),
         Mcfunction::new_static(
@@ -286,10 +322,29 @@ fn compile_program(program: Program) -> Result<DataPack> {
         // Create module environment record
         String::from("data modify storage smelter:smelter fnargs set value [{record_type: {ModuleEnvironmentRecord: true}, bindings: {}, OuterEnv: {null: true}}]"),
         String::from("function smelter:syscall/allocate_on_heap"),
+        String::from("data modify storage smelter:smelter internal_stack[-1].env set value {}"),
+        String::from("data modify storage smelter:smelter internal_stack[-1].env.record set from storage smelter:smelter sysret.pointer"),
         // Create and push execution context
-        String::from("data modify storage smelter:smelter execution_stack append value {LexicalEnvironment: {}, evaluations: {}}"),
-        String::from("data modify storage smelter:smelter execution_stack[0].LexicalEnvironment.record set from storage smelter:smelter sysret.pointer"),
+        String::from("data modify storage smelter:smelter execution_stack append value {evaluations: {}}"),
+        String::from("data modify storage smelter:smelter execution_stack[0].LexicalEnvironment set from storage smelter:smelter internal_stack[-1].env"),
     ]);
+
+    for bound_name in get_var_scoped_bound_names(scoping, program.scope_id()) {
+        builder.extend_commands(vec![
+            // env.CreateMutableBinding(dn, false)
+            String::from("data modify storage smelter:smelter fnargs set value []"),
+            String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].env"),
+            format!("data modify storage smelter:smelter fnargs append value {{string: '{bound_name}'}}"),
+            String::from("data modify storage smelter:smelter fnargs append value {boolean: {false: true}}"),
+            String::from("function smelter:absop/create_mutable_binding"),
+            // env.InitializeBinding(dn, undefined)
+            String::from("data modify storage smelter:smelter fnargs set value []"),
+            String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].env"),
+            format!("data modify storage smelter:smelter fnargs append value {{string: '{bound_name}'}}"),
+            String::from("data modify storage smelter:smelter fnargs append value {undefined: true}"),
+            String::from("function smelter:absop/initialize_binding"),
+        ]);
+    }
 
     for statement in &program.body {
         compile_statement(&mut builder, statement).with_context(|| "Couldn't compile program")?;
@@ -303,6 +358,11 @@ fn compile_program(program: Program) -> Result<DataPack> {
         .commit_mcfunction();
 
     Ok(builder.complete())
+}
+
+fn get_var_scoped_bound_names(scoping: &Scoping, scope_id: ScopeId) -> Vec<&str> {
+    // n.b. not sure which bindings this actually returns, e.g. does it include child scopes?
+    scoping.get_bindings(scope_id).keys().map(|k| *k).collect()
 }
 
 fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Result<()> {
