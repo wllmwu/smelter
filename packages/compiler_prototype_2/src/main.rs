@@ -2,9 +2,12 @@ use anyhow::{Context, Result, bail};
 use clap::Parser as CliParser;
 use oxc::{
     allocator::Allocator,
-    ast::ast::{Expression, Program, Statement},
+    ast::{
+        AstKind,
+        ast::{Expression, Function, FunctionType, Program, Statement, VariableDeclarationKind},
+    },
     parser::Parser,
-    semantic::{ScopeId, Scoping, SemanticBuilder},
+    semantic::{AstNodes, ScopeId, Scoping, SemanticBuilder},
     span::{SourceType, Span},
 };
 
@@ -51,7 +54,11 @@ fn main() -> Result<()> {
 
     // println!("{:#?}", &program);
 
-    let data_pack = compile_program(&program, semantic_result.semantic.scoping())?;
+    let data_pack = compile_program(
+        &program,
+        semantic_result.semantic.scoping(),
+        semantic_result.semantic.nodes(),
+    )?;
     std::fs::create_dir_all("smelter_prototype/data/smelter/function")
         .with_context(|| "Couldn't create directories")?;
     for function in data_pack {
@@ -159,7 +166,7 @@ fn debug_log_macro(message: String) -> String {
     format!("${}", debug_log(message))
 }
 
-fn compile_program(program: &Program, scoping: &Scoping) -> Result<DataPack> {
+fn compile_program(program: &Program, scoping: &Scoping, nodes: &AstNodes) -> Result<DataPack> {
     let mut builder = DataPackBuilder::new(vec![
         // System calls
         Mcfunction::new_static(
@@ -195,21 +202,31 @@ fn compile_program(program: &Program, scoping: &Scoping) -> Result<DataPack> {
         ),
         // Abstract operations
         Mcfunction::new_static(
-            "absop/create_mutable_binding",
-            &["envRec", "N", "D"],
+            "absop/macro_create_binding",
+            &[],
+            &[
+                "$data modify storage smelter:smelter heap[$(heap_index)].bindings.$(N) set value $(bound)",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/create_immutable_binding",
+            &["envRec", "N"],
             &[
                 "data modify storage smelter:smelter macroargs set value {bound: {}}",
                 "data modify storage smelter:smelter macroargs.heap_index set from storage smelter:smelter internal_stack[-1].envRec.record",
                 "data modify storage smelter:smelter macroargs.N set from storage smelter:smelter internal_stack[-1].N",
-                "execute if data storage smelter:smelter internal_stack[-1].D.boolean.true run data modify storage smelter:smelter macroargs.bound.deletable set value true",
-                "function smelter:absop/create_mutable_binding_macro with storage smelter:smelter macroargs",
+                "function smelter:absop/macro_create_binding with storage smelter:smelter macroargs",
             ],
         ),
         Mcfunction::new_static(
-            "absop/create_mutable_binding_macro",
-            &[],
+            "absop/create_mutable_binding",
+            &["envRec", "N", "D"],
             &[
-                "$data modify storage smelter:smelter heap[$(heap_index)].bindings.$(N) set value $(bound)",
+                "data modify storage smelter:smelter macroargs set value {bound: {mutable: true}}",
+                "data modify storage smelter:smelter macroargs.heap_index set from storage smelter:smelter internal_stack[-1].envRec.record",
+                "data modify storage smelter:smelter macroargs.N set from storage smelter:smelter internal_stack[-1].N",
+                "execute if data storage smelter:smelter internal_stack[-1].D.boolean.true run data modify storage smelter:smelter macroargs.bound.deletable set value true",
+                "function smelter:absop/macro_create_binding with storage smelter:smelter macroargs",
             ],
         ),
         Mcfunction::new_static(
@@ -329,21 +346,46 @@ fn compile_program(program: &Program, scoping: &Scoping) -> Result<DataPack> {
         String::from("data modify storage smelter:smelter execution_stack[0].LexicalEnvironment set from storage smelter:smelter internal_stack[-1].env"),
     ]);
 
-    for bound_name in get_var_scoped_bound_names(scoping, program.scope_id()) {
-        builder.extend_commands(vec![
-            // env.CreateMutableBinding(dn, false)
-            String::from("data modify storage smelter:smelter fnargs set value []"),
-            String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].env"),
-            format!("data modify storage smelter:smelter fnargs append value {{string: '{bound_name}'}}"),
-            String::from("data modify storage smelter:smelter fnargs append value {boolean: {false: true}}"),
-            String::from("function smelter:absop/create_mutable_binding"),
-            // env.InitializeBinding(dn, undefined)
-            String::from("data modify storage smelter:smelter fnargs set value []"),
-            String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].env"),
-            format!("data modify storage smelter:smelter fnargs append value {{string: '{bound_name}'}}"),
-            String::from("data modify storage smelter:smelter fnargs append value {undefined: true}"),
-            String::from("function smelter:absop/initialize_binding"),
-        ]);
+    let hoisted_declarations = get_hoisted_declarations(scoping, nodes, program.scope_id());
+    for hoisted in hoisted_declarations {
+        let bound_name = hoisted.bound_name;
+        // Create binding
+        match hoisted.kind {
+            HoistedDeclarationKind::Const => {
+                builder.extend_commands(vec![
+                    // env.CreateImmutableBinding(dn, true) <- assume strict always true
+                    String::from("data modify storage smelter:smelter fnargs set value []"),
+                    String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].env"),
+                    format!("data modify storage smelter:smelter fnargs append value {{string: '{bound_name}'}}"),
+                    String::from("function smelter:absop/create_immutable_binding"),
+                ]);
+            }
+            _ => {
+                builder.extend_commands(vec![
+                    // env.CreateMutableBinding(dn, false)
+                    String::from("data modify storage smelter:smelter fnargs set value []"),
+                    String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].env"),
+                    format!("data modify storage smelter:smelter fnargs append value {{string: '{bound_name}'}}"),
+                    String::from("data modify storage smelter:smelter fnargs append value {boolean: {false: true}}"),
+                    String::from("function smelter:absop/create_mutable_binding"),
+                ]);
+            }
+        }
+        // Initialize binding if applicable
+        match hoisted.kind {
+            HoistedDeclarationKind::Var => {
+                builder.extend_commands(vec![
+                    // env.InitializeBinding(dn, undefined)
+                    String::from("data modify storage smelter:smelter fnargs set value []"),
+                    String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].env"),
+                    format!("data modify storage smelter:smelter fnargs append value {{string: '{bound_name}'}}"),
+                    String::from("data modify storage smelter:smelter fnargs append value {undefined: true}"),
+                    String::from("function smelter:absop/initialize_binding"),
+                ]);
+            }
+            HoistedDeclarationKind::Function(function) => todo!(),
+            _ => (),
+        }
     }
 
     for statement in &program.body {
@@ -360,9 +402,62 @@ fn compile_program(program: &Program, scoping: &Scoping) -> Result<DataPack> {
     Ok(builder.complete())
 }
 
-fn get_var_scoped_bound_names(scoping: &Scoping, scope_id: ScopeId) -> Vec<&str> {
+enum HoistedDeclarationKind<'a> {
+    Const,
+    Let,
+    Var,
+    Function(&'a Function<'a>),
+}
+
+struct HoistedDeclaration<'a> {
+    bound_name: &'a str,
+    kind: HoistedDeclarationKind<'a>,
+}
+
+fn get_hoisted_declarations<'a>(
+    scoping: &'a Scoping,
+    nodes: &'a AstNodes<'a>,
+    scope_id: ScopeId,
+) -> Vec<HoistedDeclaration<'a>> {
     // n.b. not sure which bindings this actually returns, e.g. does it include child scopes?
-    scoping.get_bindings(scope_id).keys().map(|k| *k).collect()
+    scoping
+        .get_bindings(scope_id)
+        .iter()
+        .filter_map(|(name, symbol_id)| {
+            let declaration_node_id = scoping.symbol_declaration(*symbol_id);
+            let declaration_node = nodes.get_node(declaration_node_id);
+            match declaration_node.kind() {
+                AstKind::Function(function) => {
+                    if let FunctionType::FunctionDeclaration = function.r#type {
+                        Some(HoistedDeclaration {
+                            bound_name: *name,
+                            kind: HoistedDeclarationKind::Function(function),
+                        })
+                    } else {
+                        None
+                    }
+                }
+                AstKind::VariableDeclaration(variable_declaration) => {
+                    match variable_declaration.kind {
+                        VariableDeclarationKind::Const => Some(HoistedDeclaration {
+                            bound_name: *name,
+                            kind: HoistedDeclarationKind::Const,
+                        }),
+                        VariableDeclarationKind::Let => Some(HoistedDeclaration {
+                            bound_name: *name,
+                            kind: HoistedDeclarationKind::Let,
+                        }),
+                        VariableDeclarationKind::Var => Some(HoistedDeclaration {
+                            bound_name: *name,
+                            kind: HoistedDeclarationKind::Var,
+                        }),
+                        _ => todo!(),
+                    }
+                }
+                _ => todo!(),
+            }
+        })
+        .collect()
 }
 
 fn compile_statement(builder: &mut DataPackBuilder, statement: &Statement) -> Result<()> {
