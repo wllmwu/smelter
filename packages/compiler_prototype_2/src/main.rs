@@ -166,6 +166,15 @@ fn debug_log_macro(message: String) -> String {
     format!("${}", debug_log(message))
 }
 
+fn make_function_file_name(function_name: Option<&str>, span: &Span) -> String {
+    let number = span.start;
+    if let Some(name) = function_name {
+        format!("{name}_{number}")
+    } else {
+        format!("anon_func_{number}")
+    }
+}
+
 fn compile_program(program: &Program, scoping: &Scoping, nodes: &AstNodes) -> Result<DataPack> {
     let mut builder = DataPackBuilder::new(vec![
         // System calls
@@ -230,6 +239,11 @@ fn compile_program(program: &Program, scoping: &Scoping, nodes: &AstNodes) -> Re
             ],
         ),
         Mcfunction::new_static(
+            "absop/define_own_property",
+            &["O", "P", "Desc"],
+            &["function smelter:absop/ordinary_define_own_property"],
+        ),
+        Mcfunction::new_static(
             "absop/get_identifier_reference",
             &["env", "name"],
             &[
@@ -266,6 +280,16 @@ fn compile_program(program: &Program, scoping: &Scoping, nodes: &AstNodes) -> Re
                 "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].outer",
                 "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].name",
                 "function smelter:absop/get_identifier_reference",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/get_own_property",
+            &["O", "P"],
+            &[
+                "function smelter:absop/ordinary_get_own_property",
+                "data modify storage smelter:smelter internal_stack[-1]._result set from storage smelter:smelter fnret",
+                "data modify storage smelter:smelter fnret set value {record_type: {CompletionRecord: true}, Type: {NORMAL: true}}",
+                "data modify storage smelter:smelter fnret.Value set from storage smelter:smelter internal_stack[-1]._result",
             ],
         ),
         Mcfunction::new_static(
@@ -316,6 +340,106 @@ fn compile_program(program: &Program, scoping: &Scoping, nodes: &AstNodes) -> Re
             ],
         ),
         Mcfunction::new_static(
+            "absop/is_extensible",
+            &["O"],
+            &["function smelter:absop/ordinary_is_extensible"],
+        ),
+        Mcfunction::new_static(
+            "absop/ordinary_define_own_property",
+            &["O", "P", "Desc"],
+            &[
+                // Let current be ?O.[[GetOwnProperty]](P)
+                "data modify storage smelter:smelter fnargs set value []",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].O",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].P",
+                "function smelter:absop/get_own_property",
+                "execute unless data storage smelter:smelter fnret.Type.NORMAL run return 1",
+                "data modify storage smelter:smelter internal_stack[-1].current set from storage smelter:smelter fnret",
+                // Let extensible be ?IsExtensible(O)
+                "data modify storage smelter:smelter fnargs set value []",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].O",
+                "function smelter:absop/is_extensible",
+                "execute unless data storage smelter:smelter fnret.Type.NORMAL run return 1",
+                "data modify storage smelter:smelter internal_stack[-1].extensible set from storage smelter:smelter fnret",
+                // Return ValidateAndApplyPropertyDescriptor(O, P, extensible, Desc, current)
+                "data modify storage smelter:smelter fnargs set value []",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].O",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].P",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].extensible",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].Desc",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].current",
+                "function smelter:absop/validate_and_apply_property_descriptor",
+                "data modify storage smelter:smelter internal_stack[-1]._result set from storage smelter:smelter fnret",
+                "data modify storage smelter:smelter fnret set value {record_type: {CompletionRecord: true}, Type: {NORMAL: true}}",
+                "data modify storage smelter:smelter fnret.Value set from storage smelter:smelter internal_stack[-1]._result",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/ordinary_function_create",
+            &[
+                "functionPrototype",
+                "thisMode",
+                "env",
+                "privateEnv",
+                "fileName", // non-standard
+                "numArgs",  // non-standard
+            ],
+            &[
+                // MakeBasicObject and initialize internal slots
+                "data modify storage smelter:smelter fnargs set value [{PrivateElements: [], Prototype: {undefined: true}, Extensible: {boolean: {true: true}}, Environment: {undefined: true}, PrivateEnvironment: {undefined: true}, ConstructorKind: {undefined: true}, ThisMode: {undefined: true}, HomeObject: {undefined: true}, Fields: [], PrivateMethods: [], ClassFieldInitializerName: {EMPTY: true}, IsClassConstructor: {false: true}}]",
+                "data modify storage smelter:smelter fnargs[0].Prototype set from storage smelter:smelter internal_stack[-1].functionPrototype",
+                "execute if data storage smelter:smelter internal_stack[-1].thisMode{LEXICAL-THIS:true} run data modify storage smelter:smelter fnargs[0].ThisMode set value {LEXICAL: true}",
+                "execute unless data storage smelter:smelter internal_stack[-1].thisMode{LEXICAL-THIS:true} run data modify storage smelter:smelter fnargs[0].ThisMode set value {STRICT: true}",
+                "data modify storage smelter:smelter fnargs[0].Environment set from storage smelter:smelter internal_stack[-1].env",
+                "data modify storage smelter:smelter fnargs[0].PrivateEnvironment set from storage smelter:smelter internal_stack[-1].privateEnv",
+                "data modify storage smelter:smelter fnargs[0].file_name set from storage smelter:smelter internal_stack[-1].fileName", // non-standard
+                "function smelter:syscall/allocate_on_heap",
+                "data modify storage smelter:smelter internal_stack[-1].F set value {}",
+                "data modify storage smelter:smelter internal_stack[-1].F.object set from storage smelter:smelter fnret.pointer",
+                // SetFunctionLength
+                "data modify storage smelter:smelter fnargs set value []",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].F",
+                "data modify storage smelter:smelter fnargs append value {string: 'length'}",
+                "data modify storage smelter:smelter fnargs append value {Writable: false, Enumerable: false, Configurable: true}",
+                "data modify storage smelter:smelter fnargs[2].Value set from storage smelter:smelter internal_stack[-1].numArgs",
+                "function smelter:absop/define_own_property",
+                // Return new object
+                "data modify storage smelter:smelter fnret set value {}",
+                "data modify storage smelter:smelter fnret.object set from storage smelter:smelter internal_stack[-1].pointer",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/ordinary_get_own_property",
+            &["O", "P"],
+            &[
+                "data modify storage smelter:smelter macroargs set value {output_path: 'internal_stack[-1].deref_O'}",
+                "data modify storage smelter:smelter macroargs.heap_index set from storage smelter:smelter internal_stack[-1].O.object",
+                "function smelter:syscall/macro_dereference_heap with storage smelter:smelter macroargs",
+                "data modify storage smelter:smelter macroargs set value {}",
+                "data modify storage smelter:smelter macroargs.P set from storage smelter:smelter internal_stack[-1].P.string",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/ordinary_get_own_property_macro",
+            &[],
+            &[
+                "execute unless data storage smelter:smelter internal_stack[-1].deref_O.properties.$(P) run data modify storage smelter:smelter fnret set value {undefined: true}",
+                "$execute if data storage smelter:smelter internal_stack[-1].deref_O.properties.$(P) run data modify storage smelter:smelter fnret set from storage smelter:smelter internal_stack[-1].deref_O.properties.$(P)",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/ordinary_is_extensible",
+            &["O"],
+            &[
+                "data modify storage smelter:smelter macroargs set value {output_path: 'internal_stack[-1].deref_O'}",
+                "data modify storage smelter:smelter macroargs.heap_index set from storage smelter:smelter internal_stack[-1].O.object",
+                "function smelter:syscall/macro_dereference_heap with storage smelter:smelter macroargs",
+                "data modify storage smelter:smelter internal_stack[-1]._result set from storage smelter:smelter fnret",
+                "data modify storage smelter:smelter fnret set value {record_type: {CompletionRecord: true}, Type: {NORMAL: true}}",
+                "data modify storage smelter:smelter fnret.Value set from storage smelter:smelter internal_stack[-1].deref_O.Extensible",
+            ],
+        ),
+        Mcfunction::new_static(
             "absop/resolve_binding",
             &["name", "env"],
             &[
@@ -326,6 +450,18 @@ fn compile_program(program: &Program, scoping: &Scoping, nodes: &AstNodes) -> Re
                 "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].env",
                 "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].name",
                 "function smelter:absop/get_identifier_reference",
+            ],
+        ),
+        Mcfunction::new_static(
+            "absop/set_function_name",
+            &["F", "name"],
+            &[
+                "data modify storage smelter:smelter fnargs set value []",
+                "data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].F",
+                "data modify storage smelter:smelter fnargs append value {string: 'name'}",
+                "data modify storage smelter:smelter fnargs append value {Writable: false, Enumerable: false, Configurable: true}",
+                "data modify storage smelter:smelter fnargs[2].Value set from storage smelter:smelter internal_stack[-1].name",
+                "function smelter:absop/define_own_property",
             ],
         ),
     ]);
@@ -383,7 +519,37 @@ fn compile_program(program: &Program, scoping: &Scoping, nodes: &AstNodes) -> Re
                     String::from("function smelter:absop/initialize_binding"),
                 ]);
             }
-            HoistedDeclarationKind::Function(function) => todo!(),
+            HoistedDeclarationKind::Function(function) => {
+                let function_name = function.id.as_ref().map(|bi| bi.name.as_str());
+                let file_name = make_function_file_name(function_name, &function.span);
+                builder.extend_commands(vec![
+                    // InstantiateOrdinaryFunctionObject
+                    // - Call OrdinaryFunctionCreate
+                    String::from("data modify storage smelter:smelter fnargs set value []"),
+                    String::from("data modify storage smelter:smelter fnargs append value {NON-LEXICAL-THIS: true}"),
+                    String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].env"),
+                    String::from("data modify storage smelter:smelter fnargs append value {null: true}"),
+                    format!("data modify storage smelter:smelter fnargs append value {{string: '{file_name}'}}"), // non-standard
+                    format!("data modify storage smelter:smelter fnargs append value {{number: {}d}}", function.params.items.len()), // non-standard
+                    String::from("function smelter:absop/ordinary_function_create"),
+                    String::from("data modify storage smelter:smelter internal_stack[-1].fo set from storage smelter:smelter fnret"),
+                    // - Call SetFunctionName
+                    String::from("data modify storage smelter:smelter fnargs set value []"),
+                    String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].fo"),
+                    format!("data modify storage smelter:smelter fnargs append value {{string: '{}'}}", function_name.unwrap_or("default")),
+                    String::from("function smelter:absop/set_function_name"),
+                    // - Call MakeConstructor
+                    String::from("data modify storage smelter:smelter fnargs set value []"),
+                    String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].fo"),
+                    String::from("function smelter:absop/make_constructor"),
+                    // env.InitializeBinding(dn, fo)
+                    String::from("data modify storage smelter:smelter fnargs set value []"),
+                    String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].env"),
+                    format!("data modify storage smelter:smelter fnargs append value {{string: '{bound_name}'}}"),
+                    String::from("data modify storage smelter:smelter fnargs append from storage smelter:smelter internal_stack[-1].fo"),
+                    String::from("function smelter:absop/initialize_binding"),
+                ]);
+            }
             _ => (),
         }
     }
