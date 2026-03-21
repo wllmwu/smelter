@@ -1,6 +1,7 @@
 {
   "rust-analyzer.linkedProjects": [
     "packages/compiler_prototype/Cargo.toml",
-    "packages/compiler_prototype_2/Cargo.toml"
+    "packages/compiler_prototype_2/Cargo.toml",
+    "packages/compiler_prototype_3/Cargo.toml"
   ]
 }
