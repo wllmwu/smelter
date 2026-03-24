@@ -45,8 +45,15 @@ pub enum SmeltingExpressionKind {
     Variable(String),
 }
 
+pub enum SmeltingAssignmentTarget {
+    ListIndex(String, i32),
+    ListVariableIndex(String, String),
+    StructProperty(String, String),
+    Variable(String),
+}
+
 pub enum SmeltingStatement {
-    Assignment(String, Box<SmeltingExpression>),
+    Assignment(Box<SmeltingAssignmentTarget>, Box<SmeltingExpression>),
     Conditional(
         Box<SmeltingExpression>,
         Vec<SmeltingStatement>,
@@ -96,7 +103,7 @@ impl Compile for SmeltingExpression {
 impl Compile for SmeltingStatement {
     fn compile(self, builder: &mut DataPackBuilder) {
         match self {
-            SmeltingStatement::Assignment(variable, value) => todo!(),
+            SmeltingStatement::Assignment(target, value) => todo!(),
             SmeltingStatement::Conditional(condition, true_branch, false_branch) => todo!(),
             SmeltingStatement::Expression(expression) => todo!(),
             SmeltingStatement::Loop(initialization, condition, update, body) => todo!(),
