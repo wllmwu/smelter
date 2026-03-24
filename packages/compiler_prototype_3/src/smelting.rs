@@ -28,20 +28,21 @@ pub enum SmeltingOperation {
 
 type ExpressionId = i32;
 
-pub enum SmeltingExpression {
-    Command(ExpressionId, String),
-    FunctionCall(ExpressionId, String, Vec<SmeltingExpression>),
-    ListElementAccess(
-        ExpressionId,
-        Box<SmeltingExpression>,
-        Box<SmeltingExpression>,
-    ),
-    ListInitialization(ExpressionId, Vec<SmeltingExpression>),
-    Literal(ExpressionId, Box<SmeltingLiteral>),
-    Operation(ExpressionId, Box<SmeltingOperation>),
-    StructInitialization(ExpressionId, Vec<(String, SmeltingExpression)>),
-    StructMemberAccess(ExpressionId, Box<SmeltingExpression>, String),
-    Variable(ExpressionId, String),
+pub struct SmeltingExpression {
+    id: ExpressionId,
+    kind: SmeltingExpressionKind,
+}
+
+pub enum SmeltingExpressionKind {
+    Command(String),
+    FunctionCall(String, Vec<SmeltingExpression>),
+    ListElementAccess(Box<SmeltingExpression>, Box<SmeltingExpression>),
+    ListInitialization(Vec<SmeltingExpression>),
+    Literal(Box<SmeltingLiteral>),
+    Operation(Box<SmeltingOperation>),
+    StructInitialization(Vec<(String, SmeltingExpression)>),
+    StructMemberAccess(Box<SmeltingExpression>, String),
+    Variable(String),
 }
 
 pub enum SmeltingStatement {
@@ -78,16 +79,16 @@ trait Compile {
 
 impl Compile for SmeltingExpression {
     fn compile(self, builder: &mut DataPackBuilder) {
-        match self {
-            SmeltingExpression::Command(id, command) => todo!(),
-            SmeltingExpression::FunctionCall(id, name, arguments) => todo!(),
-            SmeltingExpression::ListElementAccess(id, list, index) => todo!(),
-            SmeltingExpression::ListInitialization(id, elements) => todo!(),
-            SmeltingExpression::Literal(id, literal) => todo!(),
-            SmeltingExpression::Operation(id, operation) => todo!(),
-            SmeltingExpression::StructInitialization(id, members) => todo!(),
-            SmeltingExpression::StructMemberAccess(id, strukt, name) => todo!(),
-            SmeltingExpression::Variable(id, name) => todo!(),
+        match self.kind {
+            SmeltingExpressionKind::Command(command) => todo!(),
+            SmeltingExpressionKind::FunctionCall(name, arguments) => todo!(),
+            SmeltingExpressionKind::ListElementAccess(list, index) => todo!(),
+            SmeltingExpressionKind::ListInitialization(elements) => todo!(),
+            SmeltingExpressionKind::Literal(literal) => todo!(),
+            SmeltingExpressionKind::Operation(operation) => todo!(),
+            SmeltingExpressionKind::StructInitialization(members) => todo!(),
+            SmeltingExpressionKind::StructMemberAccess(strukt, name) => todo!(),
+            SmeltingExpressionKind::Variable(name) => todo!(),
         }
     }
 }
