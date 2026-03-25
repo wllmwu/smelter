@@ -133,9 +133,32 @@ impl Compile for SmeltingExpression {
 
 impl Compile for SmeltingStatement {
     fn compile(self, builder: &mut DataPackBuilder) {
+        let statement_id = self.id;
         match self.kind {
             SmeltingStatementKind::Assignment(target, value) => todo!(),
-            SmeltingStatementKind::Conditional(condition, true_branch, false_branch) => todo!(),
+            SmeltingStatementKind::Conditional(condition, true_branch, false_branch) => {
+                let true_branch_name = format!("ifelse_{statement_id}_true");
+                builder.push_function(true_branch_name.clone());
+                for statement in true_branch {
+                    statement.compile(builder);
+                }
+                builder.pop_function();
+
+                let false_branch_name = format!("ifelse_{statement_id}_false");
+                builder.push_function(false_branch_name.clone());
+                for statement in false_branch {
+                    statement.compile(builder);
+                }
+                builder.pop_function();
+
+                let condition_key = condition.get_key();
+                condition.compile(builder);
+                builder.push_command(format!("execute if data storage smelter:smelter stack[-1].expressions{{{condition_key}:true}} store result score #fn_result smelter_internal store success score #fn_success smelter_internal run function {true_branch_name}"));
+                builder.push_command(format!("execute unless data storage smelter:smelter stack[-1].expressions{{{condition_key}:true}} store result score #fn_result smelter_internal store success score #fn_success smelter_internal run function {false_branch_name}"));
+                builder.push_command(format!(
+                    "execute if score #fn_success smelter_internal matches 0 run return fail"
+                ));
+            }
             SmeltingStatementKind::Expression(expression) => {
                 expression.compile(builder);
             }
