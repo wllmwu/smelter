@@ -156,11 +156,20 @@ impl Compile for SmeltingFunction {
         for statement in self.body {
             statement.compile(builder);
         }
+
+        builder.pop_function();
     }
 }
 
 impl Compile for SmeltingProgram {
     fn compile(self, builder: &mut DataPackBuilder) {
+        builder.push_function(String::from("initialize"));
+        builder.push_command(format!(
+            "data modify storage smelter:smelter stack set value []"
+        ));
+        builder.push_command(format!("scoreboard objectives add smelter_internal dummy"));
+        builder.pop_function();
+
         for function in self.functions {
             function.compile(builder);
         }
