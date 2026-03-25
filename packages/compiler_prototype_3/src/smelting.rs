@@ -26,10 +26,10 @@ pub enum SmeltingOperation {
     StringConcatenation(Box<SmeltingExpression>, Box<SmeltingExpression>),
 }
 
-type ExpressionId = i32;
+type NodeId = i32;
 
 pub struct SmeltingExpression {
-    id: ExpressionId,
+    id: NodeId,
     kind: SmeltingExpressionKind,
 }
 
@@ -58,7 +58,12 @@ pub enum SmeltingAssignmentTarget {
     Variable(String),
 }
 
-pub enum SmeltingStatement {
+pub struct SmeltingStatement {
+    id: NodeId,
+    kind: SmeltingStatementKind,
+}
+
+pub enum SmeltingStatementKind {
     Assignment(Box<SmeltingAssignmentTarget>, Box<SmeltingExpression>),
     Conditional(
         Box<SmeltingExpression>,
@@ -128,20 +133,20 @@ impl Compile for SmeltingExpression {
 
 impl Compile for SmeltingStatement {
     fn compile(self, builder: &mut DataPackBuilder) {
-        match self {
-            SmeltingStatement::Assignment(target, value) => todo!(),
-            SmeltingStatement::Conditional(condition, true_branch, false_branch) => todo!(),
-            SmeltingStatement::Expression(expression) => {
+        match self.kind {
+            SmeltingStatementKind::Assignment(target, value) => todo!(),
+            SmeltingStatementKind::Conditional(condition, true_branch, false_branch) => todo!(),
+            SmeltingStatementKind::Expression(expression) => {
                 expression.compile(builder);
             }
-            SmeltingStatement::Loop(initialization, condition, update, body) => todo!(),
-            SmeltingStatement::Return(value) => {
+            SmeltingStatementKind::Loop(initialization, condition, update, body) => todo!(),
+            SmeltingStatementKind::Return(value) => {
                 let value_key = value.get_key();
                 value.compile(builder);
                 builder.push_command(format!("data modify storage smelter:smelter fnret set from storage smelter:smelter stack[-1].expressions.{value_key}"));
                 builder.push_command(format!("return 1"));
             }
-            SmeltingStatement::Throw(value) => {
+            SmeltingStatementKind::Throw(value) => {
                 let value_key = value.get_key();
                 value.compile(builder);
                 builder.push_command(format!("data modify storage smelter:smelter fnret set from storage smelter:smelter stack[-1].expressions.{value_key}"));
