@@ -135,8 +135,18 @@ impl Compile for SmeltingStatement {
                 expression.compile(builder);
             }
             SmeltingStatement::Loop(initialization, condition, update, body) => todo!(),
-            SmeltingStatement::Return(value) => todo!(),
-            SmeltingStatement::Throw(value) => todo!(),
+            SmeltingStatement::Return(value) => {
+                let value_key = value.get_key();
+                value.compile(builder);
+                builder.push_command(format!("data modify storage smelter:smelter fnret set from storage smelter:smelter stack[-1].expressions.{value_key}"));
+                builder.push_command(format!("return 1"));
+            }
+            SmeltingStatement::Throw(value) => {
+                let value_key = value.get_key();
+                value.compile(builder);
+                builder.push_command(format!("data modify storage smelter:smelter fnret set from storage smelter:smelter stack[-1].expressions.{value_key}"));
+                builder.push_command(format!("return fail"));
+            }
         }
     }
 }
