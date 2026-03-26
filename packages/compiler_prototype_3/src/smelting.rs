@@ -92,13 +92,13 @@ pub struct SmeltingProgram {
 }
 
 trait Compile {
-    fn compile(self, builder: &mut DataPackBuilder);
+    fn compile(&self, builder: &mut DataPackBuilder);
 }
 
 impl Compile for SmeltingExpression {
-    fn compile(self, builder: &mut DataPackBuilder) {
+    fn compile(&self, builder: &mut DataPackBuilder) {
         let expression_key = self.get_key();
-        match self.kind {
+        match &self.kind {
             SmeltingExpressionKind::Command(command) => todo!(),
             SmeltingExpressionKind::FunctionCall(name, arguments) => {
                 let mut argument_keys: Vec<String> = Vec::new();
@@ -132,9 +132,9 @@ impl Compile for SmeltingExpression {
 }
 
 impl Compile for SmeltingStatement {
-    fn compile(self, builder: &mut DataPackBuilder) {
+    fn compile(&self, builder: &mut DataPackBuilder) {
         let statement_id = self.id;
-        match self.kind {
+        match &self.kind {
             SmeltingStatementKind::Assignment(target, value) => todo!(),
             SmeltingStatementKind::Conditional(condition, true_branch, false_branch) => {
                 let true_branch_name = format!("ifelse_{statement_id}_true");
@@ -153,8 +153,8 @@ impl Compile for SmeltingStatement {
 
                 let condition_key = condition.get_key();
                 condition.compile(builder);
-                builder.push_command(format!("execute if data storage smelter:smelter stack[-1].expressions{{{condition_key}:true}} store result score #fn_result smelter_internal store success score #fn_success smelter_internal run function {true_branch_name}"));
-                builder.push_command(format!("execute unless data storage smelter:smelter stack[-1].expressions{{{condition_key}:true}} store result score #fn_result smelter_internal store success score #fn_success smelter_internal run function {false_branch_name}"));
+                builder.push_command(format!("execute if data storage smelter:smelter stack[-1].expressions{{{condition_key}:true}} store result score #fn_result smelter_internal store success score #fn_success smelter_internal run function smelter:{true_branch_name}"));
+                builder.push_command(format!("execute unless data storage smelter:smelter stack[-1].expressions{{{condition_key}:true}} store result score #fn_result smelter_internal store success score #fn_success smelter_internal run function smelter:{false_branch_name}"));
                 builder.push_command(format!(
                     "execute if score #fn_success smelter_internal matches 0 run return fail"
                 ));
@@ -180,8 +180,8 @@ impl Compile for SmeltingStatement {
 }
 
 impl Compile for SmeltingFunction {
-    fn compile(self, builder: &mut DataPackBuilder) {
-        builder.push_function(self.name);
+    fn compile(&self, builder: &mut DataPackBuilder) {
+        builder.push_function(self.name.clone());
 
         for (i, parameter) in self.parameters.iter().enumerate() {
             builder.push_command(format!("data modify storage smelter:smelter stack[-1].variables.{parameter} set from storage smelter:smelter fnargs[{i}]"));
@@ -191,7 +191,7 @@ impl Compile for SmeltingFunction {
         ));
         builder.push_command(format!("data remove storage smelter:smelter fnret"));
 
-        for statement in self.body {
+        for statement in &self.body {
             statement.compile(builder);
         }
 
@@ -200,7 +200,7 @@ impl Compile for SmeltingFunction {
 }
 
 impl Compile for SmeltingProgram {
-    fn compile(self, builder: &mut DataPackBuilder) {
+    fn compile(&self, builder: &mut DataPackBuilder) {
         builder.push_function(String::from("initialize"));
         builder.push_command(format!(
             "data modify storage smelter:smelter stack set value []"
@@ -208,7 +208,7 @@ impl Compile for SmeltingProgram {
         builder.push_command(format!("scoreboard objectives add smelter_internal dummy"));
         builder.pop_function();
 
-        for function in self.functions {
+        for function in &self.functions {
             function.compile(builder);
         }
     }
