@@ -72,9 +72,9 @@ pub enum SmeltingStatementKind {
     ),
     Expression(Box<SmeltingExpression>),
     Loop(
-        Box<SmeltingStatement>,
+        Option<Box<SmeltingStatement>>,
         Box<SmeltingExpression>,
-        Box<SmeltingStatement>,
+        Option<Box<SmeltingStatement>>,
         Vec<SmeltingStatement>,
     ),
     Return(Box<SmeltingExpression>),
@@ -138,20 +138,21 @@ impl Compile for SmeltingStatement {
             SmeltingStatementKind::Assignment(target, value) => todo!(),
             SmeltingStatementKind::Conditional(condition, true_branch, false_branch) => {
                 let true_branch_name = format!("ifelse_{statement_id}_true");
+                let false_branch_name = format!("ifelse_{statement_id}_false");
+                let condition_key = condition.get_key();
+
                 builder.push_function(true_branch_name.clone());
                 for statement in true_branch {
                     statement.compile(builder);
                 }
                 builder.pop_function();
 
-                let false_branch_name = format!("ifelse_{statement_id}_false");
                 builder.push_function(false_branch_name.clone());
                 for statement in false_branch {
                     statement.compile(builder);
                 }
                 builder.pop_function();
 
-                let condition_key = condition.get_key();
                 condition.compile(builder);
                 builder.push_command(format!("execute if data storage smelter:smelter stack[-1].expressions{{{condition_key}:true}} store result score #fn_result smelter_internal store success score #fn_success smelter_internal run function smelter:{true_branch_name}"));
                 builder.push_command(format!("execute unless data storage smelter:smelter stack[-1].expressions{{{condition_key}:true}} store result score #fn_result smelter_internal store success score #fn_success smelter_internal run function smelter:{false_branch_name}"));
@@ -162,7 +163,30 @@ impl Compile for SmeltingStatement {
             SmeltingStatementKind::Expression(expression) => {
                 expression.compile(builder);
             }
-            SmeltingStatementKind::Loop(initialization, condition, update, body) => todo!(),
+            SmeltingStatementKind::Loop(initialization, condition, update, body) => {
+                let body_name = format!("loop_{statement_id}");
+                let condition_key = condition.get_key();
+
+                builder.push_function(body_name.clone());
+                for statement in body {
+                    statement.compile(builder);
+                }
+                if let Some(statement) = update {
+                    statement.compile(builder);
+                }
+                condition.compile(builder);
+                builder.push_command(format!("execute if data storage smelter:smelter stack[-1].expressions.{{{condition_key}:true}} store result score #fn_result smelter_internal store success score #fn_success smelter_internal run function smelter:{body_name}"));
+                builder.pop_function();
+
+                if let Some(statement) = initialization {
+                    statement.compile(builder);
+                }
+                condition.compile(builder);
+                builder.push_command(format!("execute if data storage smelter:smelter stack[-1].expressions.{{{condition_key}:true}} store result score #fn_result smelter_internal store success score #fn_success smelter_internal run function smelter:{body_name}"));
+                builder.push_command(format!(
+                    "execute if score #fn_success smelter_internal matches 0 run return fail"
+                ));
+            }
             SmeltingStatementKind::Return(value) => {
                 let value_key = value.get_key();
                 value.compile(builder);
