@@ -144,8 +144,35 @@ impl Compile for SmeltingStatement {
                 value.compile(builder);
 
                 match target.deref() {
-                    SmeltingAssignmentTarget::ListIndexDynamic(list, index) => todo!(),
-                    SmeltingAssignmentTarget::ListIndexStatic(list, index) => todo!(),
+                    SmeltingAssignmentTarget::ListIndexDynamic(list, index) => {
+                        let index_key = index.get_key();
+                        let list_key = list.get_key();
+
+                        index.compile(builder);
+                        list.compile(builder);
+
+                        builder.push_command(format!(
+                            "data modify storage smelter:smelter macroargs set value {{}}"
+                        ));
+                        builder.push_command(format!("data modify storage smelter:smelter macroargs.index set from storage smelter:smelter stack[-1].expressions.{index_key}"));
+                        builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{list_key}"));
+                        builder.push_command(format!("data modify storage smelter:smelter macroargs.value set from storage smelter:smelter stack[-1].expressions.{value_key}"));
+                        builder.push_command(format!(
+                            "function smelter:macro_list_set with storage smelter:smelter macroargs"
+                        ));
+                    }
+                    SmeltingAssignmentTarget::ListIndexStatic(list, index) => {
+                        let list_key = list.get_key();
+
+                        list.compile(builder);
+
+                        builder.push_command(format!("data modify storage smelter:smelter macroargs set value {{index:{index}}}"));
+                        builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{list_key}"));
+                        builder.push_command(format!("data modify storage smelter:smelter macroargs.value set from storage smelter:smelter stack[-1].expressions.{value_key}"));
+                        builder.push_command(format!(
+                            "function smelter:macro_list_set with storage smelter:smelter macroargs"
+                        ));
+                    }
                     SmeltingAssignmentTarget::StructPropertyDynamic(strukt, property) => todo!(),
                     SmeltingAssignmentTarget::StructPropertyStatic(strukt, property) => todo!(),
                     SmeltingAssignmentTarget::Variable(name) => {
@@ -247,6 +274,12 @@ impl Compile for SmeltingProgram {
             "data modify storage smelter:smelter stack set value []"
         ));
         builder.push_command(format!("scoreboard objectives add smelter_internal dummy"));
+        builder.pop_function();
+
+        builder.push_function(String::from("macro_list_set"));
+        builder.push_command(format!(
+            "$data modify storage smelter:smelter heap[$(pointer)][$(index)] set value $(value)"
+        ));
         builder.pop_function();
 
         for function in &self.functions {
