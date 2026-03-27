@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use crate::data_pack::DataPackBuilder;
 
 pub enum SmeltingLiteral {
@@ -52,9 +54,10 @@ pub enum SmeltingExpressionKind {
 }
 
 pub enum SmeltingAssignmentTarget {
-    ListIndex(String, i32),
-    ListVariableIndex(String, String),
-    StructProperty(String, String),
+    ListIndexDynamic(Box<SmeltingExpression>, Box<SmeltingExpression>),
+    ListIndexStatic(Box<SmeltingExpression>, i32),
+    StructPropertyDynamic(Box<SmeltingExpression>, Box<SmeltingExpression>),
+    StructPropertyStatic(Box<SmeltingExpression>, String),
     Variable(String),
 }
 
@@ -135,7 +138,21 @@ impl Compile for SmeltingStatement {
     fn compile(&self, builder: &mut DataPackBuilder) {
         let statement_id = self.id;
         match &self.kind {
-            SmeltingStatementKind::Assignment(target, value) => todo!(),
+            SmeltingStatementKind::Assignment(target, value) => {
+                let value_key = value.get_key();
+
+                value.compile(builder);
+
+                match target.deref() {
+                    SmeltingAssignmentTarget::ListIndexDynamic(list, index) => todo!(),
+                    SmeltingAssignmentTarget::ListIndexStatic(list, index) => todo!(),
+                    SmeltingAssignmentTarget::StructPropertyDynamic(strukt, property) => todo!(),
+                    SmeltingAssignmentTarget::StructPropertyStatic(strukt, property) => todo!(),
+                    SmeltingAssignmentTarget::Variable(name) => {
+                        builder.push_command(format!("data modify storage smelter:smelter stack[-1].variables.{name} set from storage smelter:smelter stack[-1].expressions.{value_key}"));
+                    }
+                }
+            }
             SmeltingStatementKind::Conditional(condition, true_branch, false_branch) => {
                 let true_branch_name = format!("ifelse_{statement_id}_true");
                 let false_branch_name = format!("ifelse_{statement_id}_false");
