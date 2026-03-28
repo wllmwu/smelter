@@ -129,7 +129,9 @@ impl Compile for SmeltingExpression {
             SmeltingExpressionKind::MapAccess(map, key) => todo!(),
             SmeltingExpressionKind::MapInitialization(entries) => todo!(),
             SmeltingExpressionKind::Operation(operation) => todo!(),
-            SmeltingExpressionKind::Variable(name) => todo!(),
+            SmeltingExpressionKind::Variable(name) => {
+                builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter stack[-1].variables.{name}"));
+            }
         }
     }
 }
