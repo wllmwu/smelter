@@ -44,20 +44,20 @@ impl SmeltingExpression {
 pub enum SmeltingExpressionKind {
     Command(String),
     FunctionCall(String, Vec<SmeltingExpression>),
-    ListElementAccess(Box<SmeltingExpression>, Box<SmeltingExpression>),
+    ListAccess(Box<SmeltingExpression>, Box<SmeltingExpression>),
     ListInitialization(Vec<SmeltingExpression>),
     Literal(Box<SmeltingLiteral>),
+    MapAccess(Box<SmeltingExpression>, String),
+    MapInitialization(Vec<(String, SmeltingExpression)>),
     Operation(Box<SmeltingOperation>),
-    StructInitialization(Vec<(String, SmeltingExpression)>),
-    StructMemberAccess(Box<SmeltingExpression>, String),
     Variable(String),
 }
 
 pub enum SmeltingAssignmentTarget {
     ListIndexDynamic(Box<SmeltingExpression>, Box<SmeltingExpression>),
     ListIndexStatic(Box<SmeltingExpression>, i32),
-    StructPropertyDynamic(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    StructPropertyStatic(Box<SmeltingExpression>, String),
+    MapKeyDynamic(Box<SmeltingExpression>, Box<SmeltingExpression>),
+    MapKeyStatic(Box<SmeltingExpression>, String),
     Variable(String),
 }
 
@@ -123,12 +123,12 @@ impl Compile for SmeltingExpression {
                 builder.push_command(format!("data remove storage smelter:smelter stack[-1]"));
                 builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter fnret"));
             }
-            SmeltingExpressionKind::ListElementAccess(list, index) => todo!(),
+            SmeltingExpressionKind::ListAccess(list, index) => todo!(),
             SmeltingExpressionKind::ListInitialization(elements) => todo!(),
             SmeltingExpressionKind::Literal(literal) => todo!(),
+            SmeltingExpressionKind::MapAccess(map, key) => todo!(),
+            SmeltingExpressionKind::MapInitialization(entries) => todo!(),
             SmeltingExpressionKind::Operation(operation) => todo!(),
-            SmeltingExpressionKind::StructInitialization(members) => todo!(),
-            SmeltingExpressionKind::StructMemberAccess(strukt, name) => todo!(),
             SmeltingExpressionKind::Variable(name) => todo!(),
         }
     }
@@ -173,30 +173,32 @@ impl Compile for SmeltingStatement {
                             "function smelter:macro_list_set with storage smelter:smelter macroargs"
                         ));
                     }
-                    SmeltingAssignmentTarget::StructPropertyDynamic(strukt, property) => {
-                        let property_key = property.get_key();
-                        let struct_key = strukt.get_key();
+                    SmeltingAssignmentTarget::MapKeyDynamic(map, key) => {
+                        let key_expression_key = key.get_key();
+                        let map_key = map.get_key();
 
-                        property.compile(builder);
-                        strukt.compile(builder);
+                        key.compile(builder);
+                        map.compile(builder);
 
                         builder.push_command(format!(
                             "data modify storage smelter:smelter macroargs set value {{}}"
                         ));
-                        builder.push_command(format!("data modify storage smelter:smelter macroargs.property set from storage smelter:smelter stack[-1].expressions.{property_key}"));
-                        builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{struct_key}"));
+                        builder.push_command(format!("data modify storage smelter:smelter macroargs.key set from storage smelter:smelter stack[-1].expressions.{key_expression_key}"));
+                        builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{map_key}"));
                         builder.push_command(format!("data modify storage smelter:smelter macroargs.value set from storage smelter:smelter stack[-1].expressions.{value_key}"));
                         builder.push_command(format!(
                             "function smelter:macro_struct_set with storage smelter:smelter macroargs"
                         ));
                     }
-                    SmeltingAssignmentTarget::StructPropertyStatic(strukt, property) => {
-                        let struct_key = strukt.get_key();
+                    SmeltingAssignmentTarget::MapKeyStatic(map, key) => {
+                        let map_key = map.get_key();
 
-                        strukt.compile(builder);
+                        map.compile(builder);
 
-                        builder.push_command(format!("data modify storage smelter:smelter macroargs set value {{property:{property}}}"));
-                        builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{struct_key}"));
+                        builder.push_command(format!(
+                            "data modify storage smelter:smelter macroargs set value {{key:{key}}}"
+                        ));
+                        builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{map_key}"));
                         builder.push_command(format!("data modify storage smelter:smelter macroargs.value set from storage smelter:smelter stack[-1].expressions.{value_key}"));
                         builder.push_command(format!(
                             "function smelter:macro_struct_set with storage smelter:smelter macroargs"
@@ -311,7 +313,7 @@ impl Compile for SmeltingProgram {
 
         builder.push_function(String::from("macro_struct_set"));
         builder.push_command(format!(
-            "$data modify storage smelter:smelter heap[$(pointer)].$(property) set value $(value)"
+            "$data modify storage smelter:smelter heap[$(pointer)].$(key) set value $(value)"
         ));
         builder.pop_function();
 
