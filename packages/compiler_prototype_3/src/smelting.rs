@@ -9,6 +9,17 @@ pub enum SmeltingLiteral {
     String(String),
 }
 
+impl ToString for SmeltingLiteral {
+    fn to_string(&self) -> String {
+        match self {
+            SmeltingLiteral::Boolean(b) => b.to_string(),
+            SmeltingLiteral::Integer(i) => i.to_string(),
+            SmeltingLiteral::Float(f) => f.to_string(),
+            SmeltingLiteral::String(s) => s.clone(),
+        }
+    }
+}
+
 pub enum SmeltingOperation {
     BooleanNegation(Box<SmeltingExpression>),
     BooleanConjunction(Box<SmeltingExpression>, Box<SmeltingExpression>),
@@ -109,12 +120,14 @@ impl Compile for SmeltingExpression {
                     argument_keys.push(argument.get_key());
                     argument.compile(builder);
                 }
+
                 builder.push_command(format!(
                     "data modify storage smelter:smelter fnargs set value []"
                 ));
                 for arg_key in argument_keys {
                     builder.push_command(format!("data modify storage smelter:smelter fnargs append from storage smelter:smelter stack[-1].expressions.{arg_key}"));
                 }
+
                 builder.push_command(format!("data modify storage smelter:smelter stack append value {{variables: {{}}, expressions: {{}}}}"));
                 builder.push_command(format!("execute store result score #fn_result smelter_internal store success score #fn_success smelter_internal run function smelter:{name}"));
                 builder.push_command(format!(
@@ -125,7 +138,10 @@ impl Compile for SmeltingExpression {
             }
             SmeltingExpressionKind::ListAccess(list, index) => todo!(),
             SmeltingExpressionKind::ListInitialization(elements) => todo!(),
-            SmeltingExpressionKind::Literal(literal) => todo!(),
+            SmeltingExpressionKind::Literal(literal) => {
+                let value = literal.to_string();
+                builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set value {value}"));
+            }
             SmeltingExpressionKind::MapAccess(map, key) => todo!(),
             SmeltingExpressionKind::MapInitialization(entries) => todo!(),
             SmeltingExpressionKind::Operation(operation) => todo!(),
