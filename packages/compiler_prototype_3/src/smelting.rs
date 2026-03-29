@@ -126,8 +126,8 @@ impl Compile for SmeltingExpression {
                 builder.push_command(format!(
                     "data modify storage smelter:smelter fnargs set value []"
                 ));
-                for arg_key in argument_keys {
-                    builder.push_command(format!("data modify storage smelter:smelter fnargs append from storage smelter:smelter stack[-1].expressions.{arg_key}"));
+                for argument_key in argument_keys {
+                    builder.push_command(format!("data modify storage smelter:smelter fnargs append from storage smelter:smelter stack[-1].expressions.{argument_key}"));
                 }
 
                 builder.push_command(format!("data modify storage smelter:smelter stack append value {{variables: {{}}, expressions: {{}}}}"));
@@ -139,7 +139,29 @@ impl Compile for SmeltingExpression {
                 builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter fnret"));
             }
             SmeltingExpressionKind::ListAccess(list, index) => todo!(),
-            SmeltingExpressionKind::ListInitialization(elements) => todo!(),
+            SmeltingExpressionKind::ListInitialization(elements) => {
+                let mut element_keys: Vec<String> = Vec::new();
+                for element in elements {
+                    element_keys.push(element.get_key());
+                    element.compile(builder);
+                }
+
+                builder.push_command(format!("function smelter:alloc_list"));
+                builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter fnret"));
+
+                if !element_keys.is_empty() {
+                    builder.push_command(format!(
+                        "data modify storage smelter:smelter macroargs set value {{}}"
+                    ));
+                    builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{expression_key}"));
+                }
+                for element_key in element_keys {
+                    builder.push_command(format!("data modify storage smelter:smelter macroargs.value set from storage smelter:smelter stack[-1].expressions.{element_key}"));
+                    builder.push_command(format!(
+                        "function smelter:macro_list_append with storage smelter:smelter macroargs"
+                    ));
+                }
+            }
             SmeltingExpressionKind::Literal(literal) => {
                 let value = literal.to_string();
                 builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set value {value}"));
@@ -323,6 +345,19 @@ impl Compile for SmeltingProgram {
             "data modify storage smelter:smelter stack set value []"
         ));
         builder.push_command(format!("scoreboard objectives add smelter_internal dummy"));
+        builder.pop_function();
+
+        builder.push_function(String::from("alloc_list"));
+        builder.push_command(format!("execute store result storage smelter:smelter fnret int 1 run data get storage smelter:smelter heap"));
+        builder.push_command(format!(
+            "data modify storage smelter:smelter heap append value []"
+        ));
+        builder.pop_function();
+
+        builder.push_function(String::from("macro_list_append"));
+        builder.push_command(format!(
+            "$data modify storage smelter:smelter heap[$(pointer)] append value $(value)"
+        ));
         builder.pop_function();
 
         builder.push_function(String::from("macro_list_set"));
