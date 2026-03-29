@@ -207,7 +207,7 @@ impl Compile for SmeltingStatement {
                         builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{map_key}"));
                         builder.push_command(format!("data modify storage smelter:smelter macroargs.value set from storage smelter:smelter stack[-1].expressions.{value_key}"));
                         builder.push_command(format!(
-                            "function smelter:macro_struct_set with storage smelter:smelter macroargs"
+                            "function smelter:macro_map_set with storage smelter:smelter macroargs"
                         ));
                     }
                     SmeltingAssignmentTarget::MapKeyStatic(map, key) => {
@@ -221,7 +221,7 @@ impl Compile for SmeltingStatement {
                         builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{map_key}"));
                         builder.push_command(format!("data modify storage smelter:smelter macroargs.value set from storage smelter:smelter stack[-1].expressions.{value_key}"));
                         builder.push_command(format!(
-                            "function smelter:macro_struct_set with storage smelter:smelter macroargs"
+                            "function smelter:macro_map_set with storage smelter:smelter macroargs"
                         ));
                     }
                     SmeltingAssignmentTarget::Variable(name) => {
@@ -331,7 +331,7 @@ impl Compile for SmeltingProgram {
         ));
         builder.pop_function();
 
-        builder.push_function(String::from("macro_struct_set"));
+        builder.push_function(String::from("macro_map_set"));
         builder.push_command(format!(
             "$data modify storage smelter:smelter heap[$(pointer)].$(key) set value $(value)"
         ));
