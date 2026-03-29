@@ -121,7 +121,37 @@ impl Compile for SmeltingExpression {
     fn compile(&self, builder: &mut DataPackBuilder) {
         let expression_key = self.get_key();
         match &self.kind {
-            SmeltingExpressionKind::BinaryOperation(operation, left, right) => {}
+            SmeltingExpressionKind::BinaryOperation(operation, left, right) => {
+                let left_key = left.get_key();
+                let right_key = right.get_key();
+
+                left.compile(builder);
+                right.compile(builder);
+
+                match operation.deref() {
+                    SmeltingBinaryOperation::BooleanConjunction => {
+                        builder.push_command(format!("execute store result score #op1 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{left_key}"));
+                        builder.push_command(format!("execute if score #op1 smelter_internal matches 0 run data modify storage smelter:smelter stack[-1].expressions.{expression_key} set value false"));
+                        builder.push_command(format!("execute unless score #op1 smelter_internal matches 0 run data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter stack[-1].expressions.{right_key}"));
+                    }
+                    SmeltingBinaryOperation::BooleanDisjunction => {
+                        builder.push_command(format!("execute store result score #op1 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{left_key}"));
+                        builder.push_command(format!("execute unless score #op1 smelter_internal matches 0 run data modify storage smelter:smelter stack[-1].expressions.{expression_key} set value true"));
+                        builder.push_command(format!("execute if score #op1 smelter_internal matches 0 run data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter stack[-1].expressions.{right_key}"));
+                    }
+                    SmeltingBinaryOperation::IntegerAddition => todo!(),
+                    SmeltingBinaryOperation::IntegerSubtraction => todo!(),
+                    SmeltingBinaryOperation::IntegerMultiplication => todo!(),
+                    SmeltingBinaryOperation::IntegerDivision => todo!(),
+                    SmeltingBinaryOperation::IntegerModulo => todo!(),
+                    SmeltingBinaryOperation::FloatAddition => todo!(),
+                    SmeltingBinaryOperation::FloatSubtraction => todo!(),
+                    SmeltingBinaryOperation::FloatMultiplication => todo!(),
+                    SmeltingBinaryOperation::FloatDivision => todo!(),
+                    SmeltingBinaryOperation::FloatModulo => todo!(),
+                    SmeltingBinaryOperation::StringConcatenation => todo!(),
+                }
+            }
             SmeltingExpressionKind::Command(command) => {
                 builder.push_command(command.clone());
             }
@@ -232,7 +262,20 @@ impl Compile for SmeltingExpression {
                     ));
                 }
             }
-            SmeltingExpressionKind::UnaryOperation(operation, operand) => todo!(),
+            SmeltingExpressionKind::UnaryOperation(operation, operand) => {
+                let operand_key = operand.get_key();
+                operand.compile(builder);
+
+                match operation.deref() {
+                    SmeltingUnaryOperation::BooleanNegation => {
+                        builder.push_command(format!("execute store result score #op1 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{operand_key}"));
+                        builder.push_command(format!("execute if score #op1 smelter_internal matches 0 run data modify storage smelter:smelter stack[-1].expressions.{expression_key} set value true"));
+                        builder.push_command(format!("execute unless score #op1 smelter_internal matches 0 run data modify storage smelter:smelter stack[-1].expressions.{expression_key} set value false"));
+                    }
+                    SmeltingUnaryOperation::IntegerNegation => todo!(),
+                    SmeltingUnaryOperation::FloatNegation => todo!(),
+                }
+            }
             SmeltingExpressionKind::Variable(name) => {
                 builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter stack[-1].variables.{name}"));
             }
