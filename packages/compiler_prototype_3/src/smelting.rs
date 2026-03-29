@@ -139,11 +139,36 @@ impl Compile for SmeltingExpression {
                         builder.push_command(format!("execute unless score #op1 smelter_internal matches 0 run data modify storage smelter:smelter stack[-1].expressions.{expression_key} set value true"));
                         builder.push_command(format!("execute if score #op1 smelter_internal matches 0 run data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter stack[-1].expressions.{right_key}"));
                     }
-                    SmeltingBinaryOperation::IntegerAddition => todo!(),
-                    SmeltingBinaryOperation::IntegerSubtraction => todo!(),
-                    SmeltingBinaryOperation::IntegerMultiplication => todo!(),
-                    SmeltingBinaryOperation::IntegerDivision => todo!(),
-                    SmeltingBinaryOperation::IntegerModulo => todo!(),
+                    SmeltingBinaryOperation::IntegerAddition => {
+                        builder.push_command(format!("execute store result score #op1 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{left_key}"));
+                        builder.push_command(format!("execute store result score #op2 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{right_key}"));
+                        builder.push_command(format!("scoreboard players operation #op1 smelter_internal += #op2 smelter_internal"));
+                        builder.push_command(format!("execute store result storage smelter:smelter stack[-1].expressions.{expression_key} int 1 run scoreboard players get #op1 smelter_internal"));
+                    }
+                    SmeltingBinaryOperation::IntegerSubtraction => {
+                        builder.push_command(format!("execute store result score #op1 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{left_key}"));
+                        builder.push_command(format!("execute store result score #op2 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{right_key}"));
+                        builder.push_command(format!("scoreboard players operation #op1 smelter_internal -= #op2 smelter_internal"));
+                        builder.push_command(format!("execute store result storage smelter:smelter stack[-1].expressions.{expression_key} int 1 run scoreboard players get #op1 smelter_internal"));
+                    }
+                    SmeltingBinaryOperation::IntegerMultiplication => {
+                        builder.push_command(format!("execute store result score #op1 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{left_key}"));
+                        builder.push_command(format!("execute store result score #op2 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{right_key}"));
+                        builder.push_command(format!("scoreboard players operation #op1 smelter_internal *= #op2 smelter_internal"));
+                        builder.push_command(format!("execute store result storage smelter:smelter stack[-1].expressions.{expression_key} int 1 run scoreboard players get #op1 smelter_internal"));
+                    }
+                    SmeltingBinaryOperation::IntegerDivision => {
+                        builder.push_command(format!("execute store result score #op1 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{left_key}"));
+                        builder.push_command(format!("execute store result score #op2 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{right_key}"));
+                        builder.push_command(format!("scoreboard players operation #op1 smelter_internal /= #op2 smelter_internal"));
+                        builder.push_command(format!("execute store result storage smelter:smelter stack[-1].expressions.{expression_key} int 1 run scoreboard players get #op1 smelter_internal"));
+                    }
+                    SmeltingBinaryOperation::IntegerModulo => {
+                        builder.push_command(format!("execute store result score #op1 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{left_key}"));
+                        builder.push_command(format!("execute store result score #op2 smelter_internal run data get storage smelter:smelter stack[-1].expressions.{right_key}"));
+                        builder.push_command(format!("scoreboard players operation #op1 smelter_internal %= #op2 smelter_internal"));
+                        builder.push_command(format!("execute store result storage smelter:smelter stack[-1].expressions.{expression_key} int 1 run scoreboard players get #op1 smelter_internal"));
+                    }
                     SmeltingBinaryOperation::FloatAddition => todo!(),
                     SmeltingBinaryOperation::FloatSubtraction => todo!(),
                     SmeltingBinaryOperation::FloatMultiplication => todo!(),
@@ -272,7 +297,9 @@ impl Compile for SmeltingExpression {
                         builder.push_command(format!("execute if score #op1 smelter_internal matches 0 run data modify storage smelter:smelter stack[-1].expressions.{expression_key} set value true"));
                         builder.push_command(format!("execute unless score #op1 smelter_internal matches 0 run data modify storage smelter:smelter stack[-1].expressions.{expression_key} set value false"));
                     }
-                    SmeltingUnaryOperation::IntegerNegation => todo!(),
+                    SmeltingUnaryOperation::IntegerNegation => {
+                        builder.push_command(format!("execute store result storage smelter:smelter stack[-1].expressions.{expression_key} int -1 run data get storage smelter:smelter stack[-1].expressions.{operand_key}"));
+                    }
                     SmeltingUnaryOperation::FloatNegation => todo!(),
                 }
             }
