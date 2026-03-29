@@ -20,23 +20,26 @@ impl ToString for SmeltingLiteral {
     }
 }
 
-pub enum SmeltingOperation {
-    BooleanNegation(Box<SmeltingExpression>),
-    BooleanConjunction(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    BooleanDisjunction(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    IntegerNegation(Box<SmeltingExpression>),
-    IntegerAddition(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    IntegerSubtraction(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    IntegerMultiplication(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    IntegerDivision(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    IntegerModulo(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    FloatNegation(Box<SmeltingExpression>),
-    FloatAddition(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    FloatSubtraction(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    FloatMultiplication(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    FloatDivision(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    FloatModulo(Box<SmeltingExpression>, Box<SmeltingExpression>),
-    StringConcatenation(Box<SmeltingExpression>, Box<SmeltingExpression>),
+pub enum SmeltingBinaryOperation {
+    BooleanConjunction,
+    BooleanDisjunction,
+    IntegerAddition,
+    IntegerSubtraction,
+    IntegerMultiplication,
+    IntegerDivision,
+    IntegerModulo,
+    FloatAddition,
+    FloatSubtraction,
+    FloatMultiplication,
+    FloatDivision,
+    FloatModulo,
+    StringConcatenation,
+}
+
+pub enum SmeltingUnaryOperation {
+    BooleanNegation,
+    IntegerNegation,
+    FloatNegation,
 }
 
 type NodeId = i32;
@@ -53,6 +56,11 @@ impl SmeltingExpression {
 }
 
 pub enum SmeltingExpressionKind {
+    BinaryOperation(
+        Box<SmeltingBinaryOperation>,
+        Box<SmeltingExpression>,
+        Box<SmeltingExpression>,
+    ),
     Command(String),
     FunctionCall(String, Vec<SmeltingExpression>),
     ListAccess(Box<SmeltingExpression>, Box<SmeltingExpression>),
@@ -60,7 +68,7 @@ pub enum SmeltingExpressionKind {
     Literal(Box<SmeltingLiteral>),
     MapAccess(Box<SmeltingExpression>, Box<SmeltingExpression>),
     MapInitialization(Vec<(String, SmeltingExpression)>),
-    Operation(Box<SmeltingOperation>),
+    UnaryOperation(Box<SmeltingUnaryOperation>, Box<SmeltingExpression>),
     Variable(String),
 }
 
@@ -113,6 +121,7 @@ impl Compile for SmeltingExpression {
     fn compile(&self, builder: &mut DataPackBuilder) {
         let expression_key = self.get_key();
         match &self.kind {
+            SmeltingExpressionKind::BinaryOperation(operation, left, right) => {}
             SmeltingExpressionKind::Command(command) => {
                 builder.push_command(command.clone());
             }
@@ -223,7 +232,7 @@ impl Compile for SmeltingExpression {
                     ));
                 }
             }
-            SmeltingExpressionKind::Operation(operation) => todo!(),
+            SmeltingExpressionKind::UnaryOperation(operation, operand) => todo!(),
             SmeltingExpressionKind::Variable(name) => {
                 builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter stack[-1].variables.{name}"));
             }
