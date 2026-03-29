@@ -113,7 +113,9 @@ impl Compile for SmeltingExpression {
     fn compile(&self, builder: &mut DataPackBuilder) {
         let expression_key = self.get_key();
         match &self.kind {
-            SmeltingExpressionKind::Command(command) => todo!(),
+            SmeltingExpressionKind::Command(command) => {
+                builder.push_command(command.clone());
+            }
             SmeltingExpressionKind::FunctionCall(name, arguments) => {
                 let mut argument_keys: Vec<String> = Vec::new();
                 for argument in arguments {
