@@ -167,7 +167,32 @@ impl Compile for SmeltingExpression {
                 builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set value {value}"));
             }
             SmeltingExpressionKind::MapAccess(map, key) => todo!(),
-            SmeltingExpressionKind::MapInitialization(entries) => todo!(),
+            SmeltingExpressionKind::MapInitialization(entries) => {
+                let mut entry_keys: Vec<(String, String)> = Vec::new();
+                for (key, value) in entries {
+                    entry_keys.push((key.clone(), value.get_key()));
+                    value.compile(builder);
+                }
+
+                builder.push_command(format!("function smelter:alloc_map"));
+                builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter fnret"));
+
+                if !entry_keys.is_empty() {
+                    builder.push_command(format!(
+                        "data modify storage smelter:smelter macroargs set value {{}}"
+                    ));
+                    builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{expression_key}"));
+                }
+                for (key, value_key) in entry_keys {
+                    builder.push_command(format!(
+                        "data modify storage smelter:smelter macroargs.key set value {key}"
+                    ));
+                    builder.push_command(format!("data modify storage smelter:smelter macroargs.value set from storage smelter:smelter stack[-1].expressions.{value_key}"));
+                    builder.push_command(format!(
+                        "function smelter:macro_map_set with storage smelter:smelter macroargs"
+                    ));
+                }
+            }
             SmeltingExpressionKind::Operation(operation) => todo!(),
             SmeltingExpressionKind::Variable(name) => {
                 builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter stack[-1].variables.{name}"));
@@ -351,6 +376,13 @@ impl Compile for SmeltingProgram {
         builder.push_command(format!("execute store result storage smelter:smelter fnret int 1 run data get storage smelter:smelter heap"));
         builder.push_command(format!(
             "data modify storage smelter:smelter heap append value []"
+        ));
+        builder.pop_function();
+
+        builder.push_function(String::from("alloc_map"));
+        builder.push_command(format!("execute store result storage smelter:smelter fnret int 1 run data get storage smelter:smelter heap"));
+        builder.push_command(format!(
+            "data modify storage smelter:smelter heap append value {{}}"
         ));
         builder.pop_function();
 
