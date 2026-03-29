@@ -58,7 +58,7 @@ pub enum SmeltingExpressionKind {
     ListAccess(Box<SmeltingExpression>, Box<SmeltingExpression>),
     ListInitialization(Vec<SmeltingExpression>),
     Literal(Box<SmeltingLiteral>),
-    MapAccess(Box<SmeltingExpression>, String),
+    MapAccess(Box<SmeltingExpression>, Box<SmeltingExpression>),
     MapInitialization(Vec<(String, SmeltingExpression)>),
     Operation(Box<SmeltingOperation>),
     Variable(String),
@@ -138,7 +138,22 @@ impl Compile for SmeltingExpression {
                 builder.push_command(format!("data remove storage smelter:smelter stack[-1]"));
                 builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter fnret"));
             }
-            SmeltingExpressionKind::ListAccess(list, index) => todo!(),
+            SmeltingExpressionKind::ListAccess(list, index) => {
+                let list_key = list.get_key();
+                let index_key = index.get_key();
+
+                list.compile(builder);
+                index.compile(builder);
+
+                builder.push_command(format!(
+                    "data modify storage smelter:smelter macroargs set value {{}}"
+                ));
+                builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{list_key}"));
+                builder.push_command(format!("data modify storage smelter:smelter macroargs.index set from storage smelter:smelter stack[-1].expressions.{index_key}"));
+                builder.push_command(format!(
+                    "function smelter:macro_list_get with storage smelter:smelter macroargs"
+                ));
+            }
             SmeltingExpressionKind::ListInitialization(elements) => {
                 let mut element_keys: Vec<String> = Vec::new();
                 for element in elements {
@@ -166,7 +181,22 @@ impl Compile for SmeltingExpression {
                 let value = literal.to_string();
                 builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set value {value}"));
             }
-            SmeltingExpressionKind::MapAccess(map, key) => todo!(),
+            SmeltingExpressionKind::MapAccess(map, key) => {
+                let map_key = map.get_key();
+                let key_expression_key = key.get_key();
+
+                map.compile(builder);
+                key.compile(builder);
+
+                builder.push_command(format!(
+                    "data modify storage smelter:smelter macroargs set value {{}}"
+                ));
+                builder.push_command(format!("data modify storage smelter:smelter macroargs.pointer set from storage smelter:smelter stack[-1].expressions.{map_key}"));
+                builder.push_command(format!("data modify storage smelter:smelter macroargs.key set from storage smelter:smelter stack[-1].expressions.{key_expression_key}"));
+                builder.push_command(format!(
+                    "function smelter:macro_map_get with storage smelter:smelter macroargs"
+                ));
+            }
             SmeltingExpressionKind::MapInitialization(entries) => {
                 let mut entry_keys: Vec<(String, String)> = Vec::new();
                 for (key, value) in entries {
@@ -392,9 +422,21 @@ impl Compile for SmeltingProgram {
         ));
         builder.pop_function();
 
+        builder.push_function(String::from("macro_list_get"));
+        builder.push_command(format!(
+            "$data modify storage smelter:smelter fnret set from storage smelter:smelter heap[$(pointer)][$(index)]"
+        ));
+        builder.pop_function();
+
         builder.push_function(String::from("macro_list_set"));
         builder.push_command(format!(
             "$data modify storage smelter:smelter heap[$(pointer)][$(index)] set value $(value)"
+        ));
+        builder.pop_function();
+
+        builder.push_function(String::from("macro_map_get"));
+        builder.push_command(format!(
+            "$data modify storage smelter:smelter fnret set from storage smelter:smelter heap[$(pointer)].$(key)"
         ));
         builder.pop_function();
 
