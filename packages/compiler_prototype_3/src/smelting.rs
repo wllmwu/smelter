@@ -174,7 +174,15 @@ impl Compile for SmeltingExpression {
                     SmeltingBinaryOperation::FloatMultiplication => todo!(),
                     SmeltingBinaryOperation::FloatDivision => todo!(),
                     SmeltingBinaryOperation::FloatModulo => todo!(),
-                    SmeltingBinaryOperation::StringConcatenation => todo!(),
+                    SmeltingBinaryOperation::StringConcatenation => {
+                        builder.push_command(format!(
+                            "data modify storage smelter:smelter sysargs set value {{}}"
+                        ));
+                        builder.push_command(format!("data modify storage smelter:smelter sysargs.s1 set from storage smelter:smelter stack[-1].expressions.{left_key}"));
+                        builder.push_command(format!("data modify storage smelter:smelter sysargs.s2 set from storage smelter:smelter stack[-1].expressions.{right_key}"));
+                        builder.push_command(format!("function smelter:concat_strings"));
+                        builder.push_command(format!("data modify storage smelter:smelter stack[-1].expressions.{expression_key} set from storage smelter:smelter fnret"));
+                    }
                 }
             }
             SmeltingExpressionKind::Command(command) => {
@@ -495,6 +503,45 @@ impl Compile for SmeltingProgram {
         ));
         builder.pop_function();
 
+        builder.push_function(String::from("concat_strings"));
+        builder.push_command(format!("execute store success score #fn_success smelter_internal run function smelter:macro_string_concat_naive with storage smelter:smelter sysargs"));
+        builder.push_command(format!(
+            "execute if score #fn_success smelter_internal matches 1 run return 1"
+        ));
+        builder.push_command(format!("data modify storage smelter:smelter sysargs.s set from storage smelter:smelter sysargs.s1"));
+        builder.push_command(format!("function smelter:escape_string"));
+        builder.push_command(format!(
+            "data modify storage smelter:smelter sysargs.s1 set from storage smelter:smelter fnret"
+        ));
+        builder.push_command(format!("data modify storage smelter:smelter sysargs.s set from storage smelter:smelter sysargs.s2"));
+        builder.push_command(format!("function smelter:escape_string"));
+        builder.push_command(format!(
+            "data modify storage smelter:smelter sysargs.s2 set from storage smelter:smelter fnret"
+        ));
+        builder.push_command(format!(
+            "function smelter:macro_string_concat_naive with storage smelter:smelter sysargs"
+        ));
+        builder.pop_function();
+
+        builder.push_function(String::from("escape_string"));
+        builder.push_command(format!(
+            "data modify storage smelter:smelter fnret set from storage smelter:smelter sysargs.s"
+        ));
+        builder.push_command(format!("scoreboard players set #branch smelter_internal 0"));
+        builder.push_command(format!("execute at @n run summon minecraft:text_display ~ ~ ~ {{Tags:['smelter'],text:{{type:'nbt',source:'storage',storage:'smelter:smelter',nbt:'sysargs.s',interpret:false}}}}"));
+        builder.push_command(format!("execute if data entity @n[type=minecraft:text_display,tag=smelter] text{{extra:['\"']}} run scoreboard players set #branch smelter_internal 1"));
+        builder.push_command(format!(
+            "execute if score #branch smelter_internal matches 1 run kill @e[tag=smelter]"
+        ));
+        builder.push_command(format!(
+            "execute if score #branch smelter_internal matches 1 run return 0"
+        ));
+        builder.push_command(format!("function smelter:macro_string_prepend_single_quote with storage smelter:smelter sysargs"));
+        builder.push_command(format!("data modify entity @n[type=minecraft:text_display,tag=smelter] text set value {{type:'nbt',source:'storage',storage:'smelter:smelter',nbt:'fnret',interpret:false}}"));
+        builder.push_command(format!("data modify storage smelter:smelter fnret set string entity @n[type=minecraft:text_display,tag=smelter] text.extra[1].text 1"));
+        builder.push_command(format!("return 1"));
+        builder.pop_function();
+
         builder.push_function(String::from("macro_list_append"));
         builder.push_command(format!(
             "$data modify storage smelter:smelter heap[$(pointer)] append value $(value)"
@@ -523,6 +570,20 @@ impl Compile for SmeltingProgram {
         builder.push_command(format!(
             "$data modify storage smelter:smelter heap[$(pointer)].$(key) set value $(value)"
         ));
+        builder.pop_function();
+
+        builder.push_function(String::from("macro_string_concat_naive"));
+        builder.push_command(format!(
+            "$data modify storage smelter:smelter fnret set value \"$(s1)$(s2)\""
+        ));
+        builder.push_command(format!("return 1"));
+        builder.pop_function();
+
+        builder.push_function(String::from("macro_string_prepend_single_quote"));
+        builder.push_command(format!(
+            "$data modify storage smelter:smelter fnret set value '\\'$(s)'"
+        ));
+        builder.push_command(format!("return 1"));
         builder.pop_function();
 
         for function in &self.functions {
